@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  labels:
+    compliance.io/tenant: payments
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fraud-detection
+  labels:
+    compliance.io/tenant: fraud-detection
+---
+# GPU namespace for AI inference workloads.
+# The collector never schedules a pod here — it streams logs from these
+# pods through the Kubernetes API from a CPU node.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference
+  labels:
+    compliance.io/team: ml-platform

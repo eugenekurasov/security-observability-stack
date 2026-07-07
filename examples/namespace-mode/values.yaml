@@ -1,0 +1,88 @@
+# Helm values for the namespace-mode example.
+#
+# Scenario: a single tenant (payments team) self-installs the collector
+# into their own namespace. No cluster-admin rights required — only
+# namespace-admin in `payments`.
+#
+# Deploy:
+#   kubectl apply -f manifests/
+#   helm install payments-obs ../../helm/observability-stack \
+#     --namespace payments \
+#     -f values.yaml
+#
+# The chart will create:
+#   - ServiceAccount in the payments namespace
+#   - Role + RoleBinding scoped to payments only
+#   - ConfigMap with the OTel Collector config
+#   - Deployment running one collector pod (on a CPU node, never on GPU nodes)
+
+mode: namespace
+
+tenantId: payments
+
+# Watch only the payments namespace.
+# Add more namespaces here if the team owns additional ones, e.g.:
+#   namespaces: ["payments", "payments-staging"]
+namespaces:
+  - payments
+
+signals:
+  logs:
+    enabled: true
+    sinceSeconds: 300
+    # Collect only pods that belong to the payments platform.
+    # Remove this to collect all pods in the namespace.
+    podLabelSelector: "app.kubernetes.io/part-of=payments-platform"
+
+  metrics:
+    enabled: true
+    # Scrape only pods annotated with prometheus.io/scrape: "true".
+    scrapeAnnotated: true
+    scrapeInterval: 30s
+    # scrapeNodes is cluster-mode only; has no effect here.
+    scrapeNodes: false
+
+  events:
+    enabled: true
+
+  traces:
+    enabled: true
+    grpcPort: 4317
+    httpPort: 4318
+
+  selfMonitoring:
+    enabled: true
+    metricsPort: 8888
+
+collector:
+  image:
+    # Replace with your OCB-built image that includes k8sapilogreceiver.
+    # See otel-components/builder-config.yaml and the Dockerfile at repo root.
+    repository: ghcr.io/YOUR_GITHUB_HANDLE/security-observability-stack/collector
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+  replicas: 1  # single runner — see Roadmap for HA/load-balancing plans
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  export:
+    # Point this at your OTLP gateway, Grafana Agent, or any OTLP-compatible backend.
+    endpoint: "otel-gateway:4317"
+    tls:
+      insecure: true
+
+  rateLimit:
+    qps: 5
+    burst: 10
+
+  reconnectBackoff:
+    initialInterval: 1s
+    maxInterval: 30s
+    maxElapsedTime: 5m

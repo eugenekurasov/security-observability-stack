@@ -1,0 +1,49 @@
+# OpenTelemetry Collector Builder (OCB) manifest.
+#
+# Produces a single collector binary (otelcol-security) that includes:
+#   - k8sapilogreceiver  — local custom component (this repo)
+#   - k8seventsreceiver  — Kubernetes Event objects (contrib)
+#   - prometheusreceiver — pod metrics scraping (contrib)
+#   - otlpreceiver       — trace/metric/log ingestion from apps (core)
+#   - otlpexporter       — forward all signals to a gateway (core)
+#   - batchprocessor     — buffer before export (core)
+#   - memorylimiterprocessor — protect collector from OOM (core)
+#
+# IMPORTANT: all version numbers below must stay in sync with the versions
+# in k8sapilogreceiver/go.mod. Mismatches are the most common build failure
+# when updating the collector release.
+#
+# As of v0.156.0 the stable modules (component, consumer, pdata, receiver)
+# are versioned at v1.62.0 independently of the core v0.x release train.
+# Receiver/processor/exporter *implementation* modules remain on v0.x.
+#
+# Build:
+#   go install go.opentelemetry.io/collector/cmd/builder@v0.156.0
+#   builder --config=otel-components/builder-config.yaml
+#
+# Or via Docker (recommended — see Dockerfile at repo root):
+#   docker build -t otelcol-security:0.1.0 .
+
+dist:
+  name: otelcol-security
+  description: OTel Collector for compliance-oriented multi-tenant observability
+  output_path: ./otel-components/dist
+  otelcol_version: "0.156.0"
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.156.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.156.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8seventsreceiver v0.156.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver v0.156.0
+  # Local module — path is relative to this file. The version label (v0.0.1)
+  # is a placeholder; OCB uses the local path, not the registry.
+  - gomod: github.com/YOUR_GITHUB_HANDLE/security-observability-stack/otel-components/k8sapilogreceiver v0.0.1
+    path: ./k8sapilogreceiver
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.156.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.156.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor v0.156.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.156.0

@@ -1,0 +1,117 @@
+# Deployment mode.
+#
+#   cluster   — ClusterRole + ClusterRoleBinding; collector watches all
+#               namespaces and can scrape node-level metrics. Requires a
+#               platform/cluster-admin to install.
+#
+#   namespace — Role + RoleBinding scoped to `namespaces` below (defaults
+#               to the release namespace). Tenant self-installable: only
+#               needs admin rights in their own namespace(s).
+#
+mode: namespace
+
+# Namespaces the collector is allowed to watch.
+# Namespace mode: defaults to the Helm release namespace if empty.
+# Cluster mode:   ignored — the collector watches all namespaces.
+namespaces: []
+
+# Attached as compliance.io/tenant label on every resource. Useful for
+# attributing collector instances to a team or service in shared platforms.
+tenantId: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Enable or disable individual observability signal types.
+# Each flag independently controls both the RBAC permissions granted and
+# the OTel Collector receiver/pipeline that is activated.
+signals:
+  logs:
+    enabled: true
+    # How far back to read when a new pod is first discovered (mirrors
+    # `kubectl logs --since`). Prevents re-reading full history on restart.
+    sinceSeconds: 300
+    # Kubernetes label selector to restrict which pods are tailed.
+    # Example: "app.kubernetes.io/part-of=payments"
+    podLabelSelector: ""
+
+  metrics:
+    enabled: true
+    # Scrape only pods that carry the prometheus.io/scrape: "true" annotation.
+    # Set to false to scrape every pod in the target namespaces.
+    scrapeAnnotated: true
+    scrapeInterval: 30s
+    # Cluster mode only: also collect kubelet / cAdvisor metrics from nodes.
+    scrapeNodes: true
+
+  events:
+    enabled: true
+    # Kubernetes Event objects are always in the same namespace as the
+    # resource they describe (pod restarts, OOMKills, scheduling failures,
+    # image pull errors, quota violations, etc.).
+    #
+    # In namespace mode:  only events from the tenant's own namespace(s) are
+    #                     visible — node/PV/control-plane events are not.
+    # In cluster mode:    events across all namespaces including kube-system
+    #                     (node pressure, PV binding, etc.) are collected.
+    #
+    # Uses k8seventsreceiver from opentelemetry-collector-contrib — no custom
+    # component required. The collector image does not need k8sapilogreceiver
+    # for this signal type.
+
+  traces:
+    enabled: true
+    grpcPort: 4317
+    httpPort: 4318
+
+  selfMonitoring:
+    enabled: true
+    # Port on which the collector exposes its own Prometheus metrics:
+    # Go process memory/CPU, pipeline throughput, drop counts, etc.
+    # When signals.metrics.enabled is true and scrapeAnnotated is true,
+    # the collector will scrape itself automatically via the prometheus
+    # receiver (the pod carries the prometheus.io/scrape annotation).
+    metricsPort: 8888
+
+collector:
+  # Must be a custom OCB-built image that includes k8sapilogreceiver.
+  # The upstream otel/opentelemetry-collector-contrib image works for
+  # metrics and traces but does not include k8sapilogreceiver.
+  # See otel-components/k8sapilogreceiver and the planned OCB manifest.
+  image:
+    repository: ghcr.io/YOUR_GITHUB_HANDLE/security-observability-stack/collector
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+  # Replicas > 1 is not yet safe: activeStreams tracking is in-process only.
+  # HA requires distributed stream coordination (not yet implemented).
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # All signals are forwarded to a single OTLP endpoint (gateway, backend, etc.).
+  export:
+    endpoint: "otel-gateway:4317"
+    tls:
+      insecure: true
+
+  # Kubernetes API rate limiting for log stream connections.
+  rateLimit:
+    qps: 5
+    burst: 10
+
+  reconnectBackoff:
+    initialInterval: 1s
+    maxInterval: 30s
+    maxElapsedTime: 5m

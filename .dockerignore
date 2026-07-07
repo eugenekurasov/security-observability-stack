@@ -1,0 +1,7 @@
+.git
+.DS_Store
+.claude/
+docs/
+helm/
+terraform/
+otel-components/dist/

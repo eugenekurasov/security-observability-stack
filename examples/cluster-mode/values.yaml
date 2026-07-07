@@ -1,0 +1,80 @@
+# Helm values for the cluster-mode example.
+#
+# Scenario: a platform/SRE team installs one collector for the entire cluster.
+# Collects logs, metrics, events, and traces from all namespaces — including
+# GPU inference nodes — without placing any collector pod on those nodes.
+#
+# Requires cluster-admin to install (creates ClusterRole + ClusterRoleBinding).
+#
+# Deploy:
+#   kubectl apply -f manifests/
+#   helm install platform-obs ../../helm/observability-stack \
+#     --namespace observability \
+#     --create-namespace \
+#     -f values.yaml
+
+mode: cluster
+
+tenantId: platform
+
+signals:
+  logs:
+    enabled: true
+    sinceSeconds: 300
+    # No label selector — collect from every pod in the cluster,
+    # including GPU inference pods in the inference namespace.
+    podLabelSelector: ""
+
+  metrics:
+    enabled: true
+    scrapeAnnotated: true
+    scrapeInterval: 30s
+    # Also scrape kubelet and cAdvisor on every node for node-level metrics.
+    # The collector itself still runs on a CPU node — this flag only controls
+    # whether node metrics endpoints are added to the scrape config.
+    scrapeNodes: true
+
+  events:
+    enabled: true
+
+  traces:
+    enabled: true
+    grpcPort: 4317
+    httpPort: 4318
+
+  selfMonitoring:
+    enabled: true
+    metricsPort: 8888
+
+collector:
+  image:
+    # Replace with your OCB-built image that includes k8sapilogreceiver.
+    repository: ghcr.io/YOUR_GITHUB_HANDLE/security-observability-stack/collector
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+  replicas: 1  # single runner — see Roadmap for HA/load-balancing plans
+
+  resources:
+    # Cluster-mode collector handles more streams — give it more headroom.
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  export:
+    endpoint: "otel-gateway:4317"
+    tls:
+      insecure: true
+
+  rateLimit:
+    # Higher QPS budget for cluster-wide pod counts.
+    qps: 20
+    burst: 40
+
+  reconnectBackoff:
+    initialInterval: 1s
+    maxInterval: 30s
+    maxElapsedTime: 5m

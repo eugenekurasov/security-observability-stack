@@ -1,0 +1,83 @@
+# GPU inference workload (inference namespace)
+#
+# This pod runs on a GPU node (tainted nvidia.com/gpu=present:NoSchedule).
+# The cluster-mode collector captures its logs and metrics without scheduling
+# any pod onto the GPU node itself — logs are streamed through the Kubernetes
+# API from the collector running on a CPU node in the observability namespace.
+#
+# With a DaemonSet-based collector you would need to add a toleration for the
+# GPU taint, placing a collector pod on every GPU node and consuming CPU/memory
+# on nodes that cost significantly more per hour.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-inference
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: llm-inference
+    app.kubernetes.io/part-of: ml-platform
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llm-inference
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: llm-inference
+        app.kubernetes.io/part-of: ml-platform
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Schedule exclusively on GPU nodes.
+      nodeSelector:
+        accelerator: nvidia-gpu
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inference-server
+          # Replace with your actual inference server image (vLLM, TGI, Triton, etc.)
+          # Using nginx:alpine here as a placeholder that generates stdout logs.
+          image: nginx:alpine
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: 4
+              memory: 16Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: 8
+              memory: 32Gi
+              nvidia.com/gpu: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: var-cache-nginx
+              mountPath: /var/cache/nginx
+            - name: var-run
+              mountPath: /var/run
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: var-cache-nginx
+          emptyDir: {}
+        - name: var-run
+          emptyDir: {}

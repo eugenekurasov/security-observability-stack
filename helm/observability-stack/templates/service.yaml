@@ -1,0 +1,21 @@
+{{- if .Values.signals.traces.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "observability-stack.fullname" . }}-collector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "observability-stack.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: otlp-grpc
+      port: {{ .Values.signals.traces.grpcPort }}
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: {{ .Values.signals.traces.httpPort }}
+      targetPort: otlp-http
+      protocol: TCP
+  selector:
+    {{- include "observability-stack.selectorLabels" . | nindent 4 }}
+{{- end }}

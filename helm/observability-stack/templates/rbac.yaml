@@ -1,0 +1,134 @@
+{{- if eq .Values.mode "cluster" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "observability-stack.fullname" . }}
+  labels:
+    {{- include "observability-stack.labels" . | nindent 4 }}
+rules:
+  {{- if .Values.signals.logs.enabled }}
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  {{- end }}
+  {{- if .Values.signals.metrics.enabled }}
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/metrics", "nodes/proxy"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs: ["get"]
+  {{- end }}
+  {{- if .Values.signals.events.enabled }}
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+  {{- if .Values.signals.selfMonitoring.enabled }}
+  # k8sclusterreceiver — cluster mode gets node/namespace access too
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces", "resourcequotas", "replicationcontrollers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "observability-stack.fullname" . }}
+  labels:
+    {{- include "observability-stack.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "observability-stack.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "observability-stack.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+
+{{- else }}
+
+{{- /* Namespace mode: one Role + RoleBinding per target namespace.
+       Defaults to the release namespace so a tenant can self-install
+       by simply running `helm install` in their own namespace. */}}
+{{- $root := . }}
+{{- $targetNs := default (list .Release.Namespace) .Values.namespaces }}
+{{- range $ns := $targetNs }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "observability-stack.fullname" $root }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "observability-stack.labels" $root | nindent 4 }}
+rules:
+  {{- if $root.Values.signals.logs.enabled }}
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  {{- end }}
+  {{- if $root.Values.signals.metrics.enabled }}
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+  {{- if $root.Values.signals.events.enabled }}
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+  {{- if $root.Values.signals.selfMonitoring.enabled }}
+  # k8sclusterreceiver — namespace mode excludes nodes/namespaces (cluster-scoped)
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "observability-stack.fullname" $root }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "observability-stack.labels" $root | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "observability-stack.serviceAccountName" $root }}
+    namespace: {{ $root.Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "observability-stack.fullname" $root }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+
+{{- end }}

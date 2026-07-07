@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "observability-stack.fullname" . }}-collector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "observability-stack.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.collector.replicas }}
+  selector:
+    matchLabels:
+      {{- include "observability-stack.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "observability-stack.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "observability-stack.collectorConfig" . | sha256sum }}
+        {{- if .Values.signals.selfMonitoring.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.signals.selfMonitoring.metricsPort | quote }}
+        prometheus.io/path: "/metrics"
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "observability-stack.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
+          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          args: ["--config=/etc/otelcol/collector.yaml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          env:
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          {{- if or .Values.signals.traces.enabled .Values.signals.selfMonitoring.enabled }}
+          ports:
+            {{- if .Values.signals.traces.enabled }}
+            - name: otlp-grpc
+              containerPort: {{ .Values.signals.traces.grpcPort }}
+              protocol: TCP
+            - name: otlp-http
+              containerPort: {{ .Values.signals.traces.httpPort }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.signals.selfMonitoring.enabled }}
+            - name: telemetry
+              containerPort: {{ .Values.signals.selfMonitoring.metricsPort }}
+              protocol: TCP
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: collector-config
+              mountPath: /etc/otelcol
+              readOnly: true
+          resources:
+            {{- toYaml .Values.collector.resources | nindent 12 }}
+      volumes:
+        - name: collector-config
+          configMap:
+            name: {{ include "observability-stack.fullname" . }}-collector

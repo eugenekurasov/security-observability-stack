@@ -1,0 +1,12 @@
+apiVersion: v2
+name: observability-stack
+description: Compliance-oriented, multi-tenant OTel observability stack with cluster and namespace deployment modes
+type: application
+version: 0.1.0
+appVersion: "0.156.0"
+keywords:
+  - observability
+  - opentelemetry
+  - compliance
+  - multi-tenant
+  - security
