@@ -8,59 +8,58 @@ isolation and audit-friendly defaults built in — not bolted on after the fact.
 
 ---
 
-## Repository layout
-
-```
-security-observability-stack/
-├── helm/observability-stack/     Helm chart — deploys the collector + RBAC
-├── otel-components/
-│   ├── k8sapilogreceiver/        Custom OTel receiver (this repo's core component)
-│   └── builder-config.yaml       OCB manifest — pins all component versions
-├── examples/
-│   ├── namespace-mode/           Single-tenant self-install example
-│   └── cluster-mode/             Platform-wide install with GPU workload example
-├── Dockerfile                    Multi-stage build: OCB → distroless runtime image
-└── docs/
-    └── architecture.md           This file
-```
-
----
-
 ## Collector architecture
 
 The collector runs as a standard Kubernetes **Deployment** (one or more replicas)
 on ordinary CPU nodes. It never requires a DaemonSet or node-level filesystem
 access.
 
-```
-                              Kubernetes cluster
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │                                                                            │
-  │  CPU nodes                      GPU nodes (inference / training)          │
-  │  ┌─────────────────────────┐    ┌──────────────────────────────────────┐  │
-  │  │  OTel Collector Pod     │    │  llm-inference pod  (A100 / H100)    │  │
-  │  │  (observability ns)     │    │  ┌──────────────────────────────┐    │  │
-  │  │                         │    │  │  inference-server container   │    │  │
-  │  │  Receivers:             │    │  │  stdout/stderr ──────────────┼────┼──┼──┐
-  │  │  ┌─────────────────┐    │    │  └──────────────────────────────┘    │  │  │
-  │  │  │ k8sapilog       │◀───┼────┼──────────────────────────────────────┘  │  │
-  │  │  │ k8sevents       │◀───┼────┤  No collector pod on GPU nodes.          │  │
-  │  │  │ prometheus      │◀───┼────┤  Logs streamed via Kubernetes API.        │  │
-  │  │  │ k8s_cluster     │◀───┼────┤                                           │  │
-  │  │  │ otlp            │    │    └───────────────────────────────────────────┘  │
-  │  │  └────────┬────────┘    │                                                   │
-  │  │           │             │    Kubernetes API server (managed on EKS/GKE)     │
-  │  │  Processors:            │    ┌──────────────────────────────────────────┐   │
-  │  │  ┌─────────────────┐    │    │  pods/log, events, metrics endpoints     │◀──┘
-  │  │  │ k8sattributes   │    │    └──────────────────────────────────────────┘
-  │  │  └────────┬────────┘    │
-  │  │           │             │
-  │  │  Exporters:             │
-  │  │  ┌─────────────────┐    │
-  │  │  │ otlp ───────────┼────┼──▶  gateway / backend (Grafana, Jaeger, etc.)
-  │  │  └─────────────────┘    │
-  │  └─────────────────────────┘
-  └──────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph cluster["Kubernetes cluster"]
+        subgraph gpu["GPU nodes  ·  inference / training"]
+            subgraph llmpod["llm-inference pod  (A100 / H100)"]
+                container["inference-server container\nstdout / stderr"]
+            end
+        end
+
+        subgraph serverless["Serverless nodes  ·  Fargate · GCP Autopilot · AKS Virtual Nodes"]
+            subgraph svpod["tenant pod"]
+                svcontainer["app container\nstdout / stderr"]
+            end
+        end
+
+        apiserver["Kubernetes API server\npods/log · events · metrics"]
+
+        subgraph cpu["CPU nodes"]
+            subgraph collector["OTel Collector  (observability ns)"]
+                subgraph recv["Receivers"]
+                    r1[k8sapilog]
+                    r2[k8sevents]
+                    r3[prometheus]
+                    r4[k8s_cluster]
+                    r5[otlp]
+                end
+                subgraph processors["Processors"]
+                    p1[k8sattributes]
+                end
+                subgraph exporters["Exporters"]
+                    e1[otlp]
+                end
+            end
+        end
+    end
+
+    apps["instrumented apps\nany namespace"]
+    backend["gateway / backend\nGrafana · Jaeger · etc."]
+
+    container -->|pods/log API| apiserver
+    svcontainer -->|pods/log API| apiserver
+    apiserver --> r1 & r2 & r3 & r4
+    apps -->|gRPC / HTTP| r5
+    r1 & r2 & r3 & r4 & r5 --> p1
+    p1 --> e1
+    e1 -->|OTLP| backend
 ```
 
 ### Signal pipeline
@@ -70,7 +69,7 @@ access.
 | **Container logs** | `k8sapilog` (custom) | stdout/stderr of every matching container, streamed via `CoreV1().Pods().GetLogs()` — same API path as `kubectl logs -f` |
 | **Kubernetes events** | `k8sevents` (contrib) | Pod restarts, OOMKills, scheduling failures, quota violations, image pull errors |
 | **App metrics** | `prometheus` (contrib) | Pods annotated with `prometheus.io/scrape: "true"` |
-| **Cluster metrics** | `k8s_cluster` (contrib) | Pod/deployment/job resource usage and status via the k8s API |
+| **Cluster metrics** | `k8s_cluster` (contrib) | Pod/deployment/job resource usage and status via the k8s API — issues a paginated LIST of all watched resource types on start, then switches to a persistent watch with an in-memory cache (30s emit interval makes zero API calls at steady state). Spike is transient but repeats on collector restart or watch reconnect after the API server's watch cache window expires. |
 | **Traces** | `otlp` (core) | Spans over gRPC (4317) / HTTP (4318) from instrumented applications |
 
 All signals pass through the **`k8sattributes` processor**, which enriches every
@@ -140,9 +139,33 @@ never host a collector pod. This holds whether the GPU nodes carry a
 independent of pod scheduling.
 
 On EKS and GKE the managed control plane absorbs the streaming load without
-meaningful overhead. On self-hosted clusters with a fixed-spec API server,
-the number of concurrent log streams (one per container) is worth accounting
-for when sizing master nodes.
+meaningful overhead. On self-hosted clusters the standard solution is a
+kube-apiserver HA setup with a load balancer in front of multiple API server
+replicas (the kubeadm HA pattern) — this distributes streaming connections
+across replicas and removes the single-instance bottleneck without any changes
+to the collector.
+
+---
+
+## Serverless Kubernetes (Fargate, AKS Virtual Nodes, GCP Autopilot)
+
+DaemonSet-based log collectors cannot run on serverless Kubernetes node pools:
+
+| Platform | Constraint |
+|---|---|
+| **AWS EKS Fargate** | Fargate profiles do not schedule DaemonSet pods — AWS explicitly excludes them |
+| **AKS Virtual Nodes** | ACI-backed virtual nodes do not support DaemonSets or `hostPath` mounts |
+| **GCP Autopilot** | User-defined DaemonSets are blocked; `hostPath` volumes are disallowed |
+
+This stack has no such constraint. The collector runs as a standard **Deployment**
+in any schedulable node pool, and reads logs through the Kubernetes API — the same
+endpoint available regardless of whether tenant workloads run on Fargate, virtual
+nodes, or standard nodes.
+
+Mixed-mode clusters (part serverless, part standard nodes) are the most common
+case where this matters: run the collector on a standard node and collect from pods
+on serverless nodes with no extra configuration. The API-server path is independent
+of where the source pods are scheduled.
 
 ---
 
@@ -190,8 +213,8 @@ kept strictly separate from per-tenant data.
    competing for resources on a node that costs orders of magnitude more than
    a standard worker.
 
-4. **Compliance mapping is explicit, not implied.** See `compliance-mapping.md`
-   (planned) for a control-by-control mapping to SOC 2 requirements
+4. **Compliance mapping is explicit, not implied.** See [`compliance-mapping.md`](compliance-mapping.md)
+   for a control-by-control mapping to SOC 2 requirements
    (audit log retention, access segregation, encryption in transit, etc.).
 
 5. **Reproducible builds.** The OCB manifest (`otel-components/builder-config.yaml`)
@@ -219,6 +242,12 @@ kept strictly separate from per-tenant data.
   two replicas would duplicate every log line because stream state is in-process.
   Planned: consistent-hash ring on pod UID with Kubernetes lease-based
   coordination so each container is owned by exactly one replica.
+
+- **Node metrics: direct kubelet scraping** — In cluster mode the node scrape
+  jobs currently route through the API server proxy. At scale every Prometheus
+  scrape of every node passes through the control plane. Switch to direct kubelet
+  scraping on port 10250 (same pattern as `kube-prometheus-stack`) to remove the
+  API server from the node metrics path.
 
 - **Terraform modules** — Cloud RBAC, namespace provisioning, IAM bindings for
   EKS/GKE.

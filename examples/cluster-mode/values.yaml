@@ -49,7 +49,7 @@ signals:
 collector:
   image:
     # Replace with your OCB-built image that includes k8sapilogreceiver.
-    repository: ghcr.io/YOUR_GITHUB_HANDLE/security-observability-stack/collector
+    repository: ghcr.io/eugenekurasov/security-observability-stack/collector
     tag: "0.1.0"
     pullPolicy: IfNotPresent
 

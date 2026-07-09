@@ -84,5 +84,3 @@ scope of the observability collection layer:
 
 - Extend with CIS Kubernetes Benchmark controls once Terraform modules
   (cloud RBAC, network policies) are in place.
-- A machine-readable version (OpenControl / OSCAL format) for automated
-  evidence collection.

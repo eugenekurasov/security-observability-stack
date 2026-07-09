@@ -84,7 +84,7 @@ collector:
   # metrics and traces but does not include k8sapilogreceiver.
   # See otel-components/k8sapilogreceiver and the planned OCB manifest.
   image:
-    repository: ghcr.io/YOUR_GITHUB_HANDLE/security-observability-stack/collector
+    repository: ghcr.io/eugenekurasov/security-observability-stack/collector
     tag: "0.1.0"
     pullPolicy: IfNotPresent
 
