@@ -23,7 +23,7 @@ flowchart LR
             end
         end
 
-        subgraph serverless["Serverless nodes  ·  Fargate · GCP Autopilot · AKS Virtual Nodes"]
+        subgraph serverless["Serverless nodes  ·  Fargate · GKE Autopilot · AKS Virtual Nodes"]
             subgraph svpod["tenant pod"]
                 svcontainer["app container\nstdout / stderr"]
             end
@@ -147,7 +147,7 @@ to the collector.
 
 ---
 
-## Serverless Kubernetes (Fargate, AKS Virtual Nodes, GCP Autopilot)
+## Serverless Kubernetes (Fargate, AKS Virtual Nodes, GKE Autopilot)
 
 DaemonSet-based log collectors cannot run on serverless Kubernetes node pools:
 
@@ -155,7 +155,7 @@ DaemonSet-based log collectors cannot run on serverless Kubernetes node pools:
 |---|---|
 | **AWS EKS Fargate** | Fargate profiles do not schedule DaemonSet pods — AWS explicitly excludes them |
 | **AKS Virtual Nodes** | ACI-backed virtual nodes do not support DaemonSets or `hostPath` mounts |
-| **GCP Autopilot** | User-defined DaemonSets are blocked; `hostPath` volumes are disallowed |
+| **GKE Autopilot** | User-defined DaemonSets are blocked; `hostPath` volumes are disallowed |
 
 This stack has no such constraint. The collector runs as a standard **Deployment**
 in any schedulable node pool, and reads logs through the Kubernetes API — the same

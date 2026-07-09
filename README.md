@@ -3,7 +3,7 @@
 A Helm chart and custom OpenTelemetry Collector receiver for
 compliance-oriented, multi-tenant observability on Kubernetes —
 built for regulated environments (finance, healthcare) and serverless
-platforms (AWS Fargate, GCP Autopilot, AKS Virtual Nodes) where
+platforms (AWS Fargate, GKE Autopilot, AKS Virtual Nodes) where
 DaemonSets are unavailable, host access is restricted, and tenant isolation
 is a first-class requirement.
 
@@ -13,7 +13,7 @@ Most observability stacks are built for a single-tenant, low-compliance
 default: broad RBAC, host-level log access via DaemonSets, and no
 built-in mapping to controls like SOC 2. Retrofitting compliance
 onto that default is expensive and error-prone. DaemonSet-based collectors
-also fail entirely on serverless node pools — Fargate, GCP Autopilot, and
+also fail entirely on serverless node pools — Fargate, GKE Autopilot, and
 AKS Virtual Nodes block DaemonSets and hostPath mounts by design.
 
 This project takes the opposite approach: start from RBAC-scoped,
@@ -22,6 +22,16 @@ observability signals on top. Because collection goes through the
 Kubernetes API rather than the node filesystem, the same stack works
 on standard nodes, GPU nodes, and serverless nodes without modification.
 
+The core component, `k8sapilogreceiver`, provides a working implementation
+of the API-server-based log collection mode discussed in
+[open-telemetry/opentelemetry-collector-contrib#23339](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/23339)
+— an approach raised in that thread as an alternative to hostPath-based
+collection, but never implemented. On serverless Kubernetes platforms
+(EKS Fargate, GKE Autopilot, AKS Virtual Nodes), where DaemonSets and
+hostPath mounts are unavailable by design, API-based collection is not an
+alternative but the only viable path.
+
+
 ### Practical benefits over DaemonSet-based collectors
 
 | Benefit | Detail |
@@ -29,7 +39,7 @@ on standard nodes, GPU nodes, and serverless nodes without modification.
 | **No collector on GPU nodes - ideal for AI clusters** | A DaemonSet schedules a collector pod on every node, including expensive GPU nodes (A100, H100). This wastes CPU and memory on nodes that should be 100% dedicated to training or inference. This stack runs as a single Deployment on a cheap CPU node and streams logs from GPU pods through the Kubernetes API — GPU nodes are never touched by the collector. |
 | **No hostPath mount** | DaemonSet collectors read log files from the host filesystem (`/var/log/pods/`), requiring broad read access to the node root. This is a common security finding in regulated environments. |
 | **Lower total resource footprint** | One collector Deployment instead of N DaemonSet pods (one per node). On EKS and GKE the managed API server handles streaming connections without dedicated cluster resources — there is no meaningful overhead for this use case. On self-hosted clusters, log data traverses the API server rather than being read locally, which is worth accounting for when sizing the control plane. |
-| **Works on serverless node pools (Fargate, GCP Autopilot, AKS Virtual Nodes)** | AWS Fargate, GCP Autopilot, and AKS Virtual Nodes block DaemonSet scheduling and disallow hostPath mounts — making node-based collectors incompatible by design. Because this stack is a plain Deployment that reads through the Kubernetes API, it collects from pods on serverless nodes with no special configuration. Mixed-mode clusters (some standard nodes, some serverless) are the typical case: run the collector on one standard CPU node and it streams logs from pods on Fargate or virtual nodes automatically. |
+| **Works on serverless node pools (Fargate, GKE Autopilot, AKS Virtual Nodes)** | AWS Fargate, GKE Autopilot, and AKS Virtual Nodes block DaemonSet scheduling and disallow hostPath mounts — making node-based collectors incompatible by design. Because this stack is a plain Deployment that reads through the Kubernetes API, it collects from pods on serverless nodes with no special configuration. Mixed-mode clusters (some standard nodes, some serverless) are the typical case: run the collector on one standard CPU node and it streams logs from pods on Fargate or virtual nodes automatically. |
 
 ## What it covers
 
@@ -183,9 +193,9 @@ is only required for container log collection.
 
 - [ ] **Terraform** - add tf modules for EKS and GKE cluster init with all required combinations.
 
-- [ ] **Branchbenchmark test** - prepare a branchbenchmark test for the new component.
+- [ ] **Benchmark test** - prepare a benchmark test for the new component.
 
-- [ ] **Node metrics: direct kubelet scraping** — In cluster mode the node scrape jobs currently route through the API server proxy (`/api/v1/nodes/$1/proxy/metrics`, `/api/v1/nodes/$1/proxy/metrics/cadvisor`). At scale every Prometheus scrape of every node passes through the control plane. Switch to direct kubelet scraping on port 10250 (same pattern as `kube-prometheus-stack`) to remove the API server from the node metrics path entirely. I am not sure if it should be a part of this component, but maybe it is good 
+- [ ] **Node metrics: direct kubelet scraping** — In cluster mode the node scrape jobs currently route through the API server proxy (`/api/v1/nodes/$1/proxy/metrics`, `/api/v1/nodes/$1/proxy/metrics/cadvisor`). At scale every Prometheus scrape of every node passes through the control plane. Switch to direct kubelet scraping on port 10250 (same pattern as `kube-prometheus-stack`) to remove the API server from the node metrics path entirely. Possibly out of scope — feedback welcome
 
 ## Status
 
