@@ -184,12 +184,16 @@ is only required for container log collection.
 
 ### TODO
 
+- [ ] **Add renovate** we need to be able keep up in date the package and docker image
+
+- [ ] **CI flow** Add a GitHub Actions workflow to build and push images to ghcr.io. Also add a release workflow for the Helm chart and the Otel Component(`k8sapilogreceiver`)
+
 - [ ] **Rich filtering and parsing** — Stanza-style operator pipeline on top of the raw stream:
   multiline joining (stack traces, JSON blobs), structured log parsing, per-container format
   routing, and label/annotation-based filter rules. Goal: feature parity with
   `filelogreceiver` filtering without the hostPath requirement.
 
-- [ ] **Load balancing / HA**
+- [ ] **Load balancing / HA** - Add load balancing to support running multiple instances concurrently, and configure high availability (HA) so that replication continues if one of the instances fails. Possible `HA` will be implemented similar to K8sLeaderElector in the `k8sclusterreceiver` in the future.
 
 - [ ] **Terraform** - add tf modules for EKS and GKE cluster init with all required combinations.
 
