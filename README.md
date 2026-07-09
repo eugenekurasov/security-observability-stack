@@ -72,7 +72,7 @@ If node-level telemetry is needed, it belongs in a separate cluster-operator-man
 | `k8sapilogreceiver` | [`otel-components/k8sapilogreceiver/`](otel-components/k8sapilogreceiver/) | Development / proof-of-concept |
 | Examples | [`examples/`](examples/) | Available |
 | Terraform modules | `terraform/` | Planned |
-| Compliance mapping | `docs/compliance-mapping.md` | Planned |
+| Compliance mapping | [`docs/compliance-mapping.md`](.docs/compliance-mapping.md) | Available |
 
 ### Examples
 
