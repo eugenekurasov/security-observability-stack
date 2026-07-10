@@ -1,2 +1,3 @@
 .claude
-.DS_Store
+**/.DS_Store
+otel-components/k8sapilogreceiver/vendor

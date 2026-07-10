@@ -193,7 +193,7 @@ is only required for container log collection.
   routing, and label/annotation-based filter rules. Goal: feature parity with
   `filelogreceiver` filtering without the hostPath requirement.
 
-- [ ] **Label filtering** - Maybe we want also to be able filter pod by label. Possibly out of scope — feedback welcome.
+- [X] **Label filtering** - Maybe we want also to be able filter pod by label. Possibly out of scope — feedback welcome.
 
 - [ ] **Load balancing / HA** - Add load balancing to support running multiple instances concurrently, and configure high availability (HA) so that replication continues if one of the instances fails. Possible `HA` will be implemented similar to K8sLeaderElector in the `k8sclusterreceiver` in the future.
 
