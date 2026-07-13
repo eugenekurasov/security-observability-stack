@@ -3,13 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-    paths:
-      - 'otel-components/k8spodlogreceiver/**'
-      - '.github/workflows/ci.yml'
   pull_request:
-    paths:
-      - 'otel-components/k8spodlogreceiver/**'
-      - '.github/workflows/ci.yml'
 
 jobs:
   unit-tests:
