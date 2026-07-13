@@ -34,7 +34,8 @@ signals:
   logs:
     enabled: true
     # How far back to read when a new pod is first discovered (mirrors
-    # `kubectl logs --since`). Prevents re-reading full history on restart.
+    # `kubectl logs --since`). Prevents re-reading full available history
+    # on restart.
     sinceSeconds: 300
     # Kubernetes label selector to restrict which pods are tailed.
     # Example: "app.kubernetes.io/part-of=payments"
