@@ -3,13 +3,7 @@ name: Integration Tests — k8spodlogreceiver
 on:
   push:
     branches: [main]
-    paths:
-      - 'otel-components/k8spodlogreceiver/**'
-      - '.github/workflows/integration.yml'
   pull_request:
-    paths:
-      - 'otel-components/k8spodlogreceiver/**'
-      - '.github/workflows/integration.yml'
 
 jobs:
   integration:
