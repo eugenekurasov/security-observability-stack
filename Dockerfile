@@ -23,13 +23,13 @@ RUN go install go.opentelemetry.io/collector/cmd/builder@v0.156.0
 WORKDIR /build
 
 # Copy the OCB manifest and the local receiver.
-# builder-config.yaml references k8sapilogreceiver via path: ./k8sapilogreceiver,
+# builder-config.yaml references k8spodlogreceiver via path: ./k8spodlogreceiver,
 # so both must land at the same level here.
 COPY otel-components/builder-config.yaml ./
-COPY otel-components/k8sapilogreceiver   ./k8sapilogreceiver/
+COPY otel-components/k8spodlogreceiver   ./k8spodlogreceiver/
 
 # Resolve and verify the local module's dependencies before OCB runs.
-RUN cd k8sapilogreceiver && go mod tidy
+RUN cd k8spodlogreceiver && go mod tidy
 
 # Override output_path so the binary lands predictably regardless of what
 # the manifest says (the manifest uses ./otel-components/dist which is

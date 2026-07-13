@@ -4,7 +4,7 @@
 # service that writes structured logs to stdout and exposes Prometheus metrics.
 #
 # What the collector picks up from this pod:
-#   logs    — stdout/stderr streamed via k8sapilogreceiver
+#   logs    — stdout/stderr streamed via k8spodlogreceiver
 #   metrics — scraped at /metrics:9113 (nginx-prometheus-exporter sidecar)
 #   events  — OOMKills, restarts, scheduling failures in the payments namespace
 #   traces  — accepted on OTLP gRPC/HTTP from the app (instrument separately)

@@ -30,7 +30,7 @@ cd security-observability-stack
 ## Step 1 — Build the collector image
 
 The Helm chart requires a custom OpenTelemetry Collector binary that includes
-`k8sapilogreceiver`. The upstream `otel/opentelemetry-collector-contrib` image
+`k8spodlogreceiver`. The upstream `otel/opentelemetry-collector-contrib` image
 does not include it and will fail to start.
 
 ```bash

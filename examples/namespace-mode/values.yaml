@@ -56,7 +56,7 @@ signals:
 
 collector:
   image:
-    # Replace with your OCB-built image that includes k8sapilogreceiver.
+    # Replace with your OCB-built image that includes k8spodlogreceiver.
     # See otel-components/builder-config.yaml and the Dockerfile at repo root.
     repository: ghcr.io/eugenekurasov/security-observability-stack/collector
     tag: "0.1.0"

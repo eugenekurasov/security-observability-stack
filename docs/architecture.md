@@ -34,7 +34,7 @@ flowchart LR
         subgraph cpu["CPU nodes"]
             subgraph collector["OTel Collector  (observability ns)"]
                 subgraph recv["Receivers"]
-                    r1[k8sapilog]
+                    r1[k8spodlog]
                     r2[k8sevents]
                     r3[prometheus]
                     r4[k8s_cluster]
@@ -66,7 +66,7 @@ flowchart LR
 
 | Signal | Receiver | What it captures |
 |---|---|---|
-| **Container logs** | `k8sapilog` (custom) | stdout/stderr of every matching container, streamed via `CoreV1().Pods().GetLogs()` — same API path as `kubectl logs -f` |
+| **Container logs** | `k8spodlog` (custom) | stdout/stderr of every matching container, streamed via `CoreV1().Pods().GetLogs()` — same API path as `kubectl logs -f` |
 | **Kubernetes events** | `k8sevents` (contrib) | Pod restarts, OOMKills, scheduling failures, quota violations, image pull errors |
 | **App metrics** | `prometheus` (contrib) | Pods annotated with `prometheus.io/scrape: "true"` |
 | **Cluster metrics** | `k8s_cluster` (contrib) | Pod/deployment/job resource usage and status via the k8s API — issues a paginated LIST of all watched resource types on start, then switches to a persistent watch with an in-memory cache (30s emit interval makes zero API calls at steady state). Spike is transient but repeats on collector restart or watch reconnect after the API server's watch cache window expires. |
@@ -176,7 +176,7 @@ from their own pods:
 
 | In scope | Mechanism |
 |---|---|
-| Container stdout/stderr | `k8sapilogreceiver` via `pods/log` RBAC |
+| Container stdout/stderr | `k8spodlogreceiver` via `pods/log` RBAC |
 | Kubernetes events | `k8seventsreceiver`, namespace-scoped |
 | Application Prometheus metrics | Prometheus receiver, annotation-driven |
 | Application traces | OTLP receiver, gRPC + HTTP |

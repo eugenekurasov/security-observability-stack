@@ -22,7 +22,7 @@ observability signals on top. Because collection goes through the
 Kubernetes API rather than the node filesystem, the same stack works
 on standard nodes, GPU nodes, and serverless nodes without modification.
 
-The core component, `k8sapilogreceiver`, provides a working implementation
+The core component, `k8spodlogreceiver`, provides a working implementation
 of the API-server-based log collection mode discussed in
 [open-telemetry/opentelemetry-collector-contrib#23339](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/23339)
 — an approach raised in that thread as an alternative to hostPath-based
@@ -48,7 +48,7 @@ from their own pods:
 
 | Signal | Mechanism |
 |---|---|
-| **Container logs** | `k8sapilogreceiver` streams stdout/stderr via the Kubernetes API (same path as `kubectl logs`) — no hostPath mount, no DaemonSet |
+| **Container logs** | `k8spodlogreceiver` streams stdout/stderr via the Kubernetes API (same path as `kubectl logs`) — no hostPath mount, no DaemonSet |
 | **Kubernetes events** | `k8seventsreceiver` watches Event objects in the tenant's namespace(s) — pod restarts, OOMKills, scheduling failures, quota violations |
 | **Metrics** | Prometheus receiver scrapes pods annotated with `prometheus.io/scrape: "true"` |
 | **Traces** | OTLP receiver accepts spans over gRPC/HTTP from application code |
@@ -69,7 +69,7 @@ If node-level telemetry is needed, it belongs in a separate cluster-operator-man
 | Component | Path | Status |
 |---|---|---|
 | Helm chart | [`helm/observability-stack/`](helm/observability-stack/) | Available |
-| `k8sapilogreceiver` | [`otel-components/k8sapilogreceiver/`](otel-components/k8sapilogreceiver/) | Development / proof-of-concept |
+| `k8spodlogreceiver` | [`otel-components/k8spodlogreceiver/`](otel-components/k8spodlogreceiver/) | Development / proof-of-concept |
 | Examples | [`examples/`](examples/) | Available |
 | Terraform modules | `terraform/` | Planned |
 | Compliance mapping | [`docs/compliance-mapping.md`](docs/compliance-mapping.md) | Available |
@@ -169,7 +169,7 @@ helm install my-obs helm/observability-stack \
 
 The Helm chart references a custom
 [OpenTelemetry Collector Builder (OCB)](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder)
-image that includes `k8sapilogreceiver`. Update `collector.image` in
+image that includes `k8spodlogreceiver`. Update `collector.image` in
 `values.yaml` once the OCB manifest and image build are in place.
 
 `k8seventsreceiver`, the Prometheus receiver, and the OTLP receiver all ship
@@ -186,7 +186,7 @@ is only required for container log collection.
 
 - [ ] **Add renovate** we need to be able keep up in date the package and docker image
 
-- [ ] **CI flow** Add a GitHub Actions workflow to build and push images to ghcr.io. Also add a release workflow for the Helm chart and the Otel Component(`k8sapilogreceiver`)
+- [ ] **CI flow** Add a GitHub Actions workflow to build and push images to ghcr.io. Also add a release workflow for the Helm chart and the Otel Component(`k8spodlogreceiver`)
 
 - [ ] **Rich filtering and parsing** — Stanza-style operator pipeline on top of the raw stream:
   multiline joining (stack traces, JSON blobs), structured log parsing, per-container format

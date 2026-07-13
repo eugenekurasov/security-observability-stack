@@ -6,18 +6,18 @@ Project guidance for AI coding assistants working in this repository.
 
 Compliance-oriented, multi-tenant observability infrastructure for Kubernetes-based platforms in regulated sectors (finance, healthcare). The stack is designed to be deployable via Terraform + Helm with tenant isolation and audit-friendly defaults built in.
 
-Components: `terraform/` (cloud infra, RBAC, IAM — planned), `helm/observability-stack` (OTel Collector deployment, implemented), `otel-components/k8sapilogreceiver` (custom OTel component, implemented).
+Components: `terraform/` (cloud infra, RBAC, IAM — planned), `helm/observability-stack` (OTel Collector deployment, implemented), `otel-components/k8spodlogreceiver` (custom OTel component, implemented).
 
-## k8sapilogreceiver (Go module)
+## k8spodlogreceiver (Go module)
 
-Located at `otel-components/k8sapilogreceiver`. This is the only implemented component so far.
+Located at `otel-components/k8spodlogreceiver`. This is the only implemented component so far.
 
-**Module path:** `github.com/eugenekurasov/security-observability-stack/otel-components/k8sapilogreceiver`
+**Module path:** `github.com/eugenekurasov/security-observability-stack/otel-components/k8spodlogreceiver`
 
 ### Commands
 
 ```bash
-cd otel-components/k8sapilogreceiver
+cd otel-components/k8spodlogreceiver
 
 # Build
 go build ./...  # requires Go 1.26+
@@ -46,7 +46,7 @@ The receiver is intended to be compiled into a custom collector binary via OCB. 
 
 Version mismatches between the OCB manifest and `go.mod` are the most common build failure when adding custom components.
 
-### Architecture of k8sapilogreceiver
+### Architecture of k8spodlogreceiver
 
 The receiver streams container logs via `client-go`'s `CoreV1().Pods(ns).GetLogs()` — the same API path as `kubectl logs -f` — instead of mounting the host filesystem. This is a deliberate security design choice, not a limitation.
 
@@ -78,7 +78,7 @@ Key design decisions:
 
 Each signal gates both the RBAC permissions and the OTel receiver/pipeline. Setting a signal to `false` removes its permissions from the generated Role/ClusterRole entirely.
 
-- `signals.logs.enabled` — `k8sapilogreceiver`
+- `signals.logs.enabled` — `k8spodlogreceiver`
 - `signals.metrics.enabled` — Prometheus receiver (pod scraping; node scraping in cluster mode via `scrapeNodes: true`)
 - `signals.traces.enabled` — OTLP receiver (gRPC + HTTP)
 - `signals.events.enabled` — `k8s_events` receiver
@@ -89,8 +89,8 @@ Each signal gates both the RBAC permissions and the OTel receiver/pipeline. Sett
 - **OTel config** is built in `templates/_collector-config.tpl` as a named template, included into `templates/configmap.yaml` with `| indent 4`. Edit the named template when changing receiver/pipeline logic.
 - **RBAC** in `templates/rbac.yaml`: cluster mode produces one ClusterRole + ClusterRoleBinding; namespace mode ranges over `$targetNs` and produces one Role + RoleBinding per namespace.
 - **`$targetNs`** is computed as `default (list .Release.Namespace) .Values.namespaces` in both the RBAC and config templates (cluster mode overrides it to `[]` for "all namespaces").
-- **Collector image** (`collector.image.repository`) must be a custom OCB-built binary with `k8sapilogreceiver` included. The upstream `otel/opentelemetry-collector-contrib` image lacks it and will fail to start.
-- **Replicas > 1 is unsafe**: `activeStreams` tracking in `k8sapilogreceiver` is in-process only. HA requires distributed stream coordination (not yet implemented).
+- **Collector image** (`collector.image.repository`) must be a custom OCB-built binary with `k8spodlogreceiver` included. The upstream `otel/opentelemetry-collector-contrib` image lacks it and will fail to start.
+- **Replicas > 1 is unsafe**: `activeStreams` tracking in `k8spodlogreceiver` is in-process only. HA requires distributed stream coordination (not yet implemented).
 - **Config checksum annotation** on the Deployment pod template forces a rollout on any config change.
 - **`k8s_cluster` receiver startup spike**: on start it issues a paginated LIST of all watched resource types (pods, deployments, replicasets, statefulsets, daemonsets, jobs, nodes, namespaces), then switches to a persistent watch with an in-memory cache — steady-state is zero API calls. The spike repeats on collector restart or watch reconnect after the API server's watch cache window expires; avoid frequent restarts on large clusters.
 - **Node metrics proxy issue** (cluster mode, `scrapeNodes: true`): the kubelet and cAdvisor scrape jobs currently route through the API server proxy (`/api/v1/nodes/$1/proxy/metrics`). Every Prometheus scrape of every node passes through the control plane — a bottleneck at scale. Planned fix: switch to direct kubelet scraping on port 10250, same pattern as `kube-prometheus-stack`.

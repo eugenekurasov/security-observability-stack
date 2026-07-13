@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'otel-components/k8spodlogreceiver/**'
+  pull_request:
+    paths:
+      - 'otel-components/k8spodlogreceiver/**'
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: otel-components/k8spodlogreceiver/go.mod
+          cache-dependency-path: otel-components/k8spodlogreceiver/go.sum
+
+      - name: Test
+        working-directory: otel-components/k8spodlogreceiver
+        run: go test -v -mod=vendor ./...

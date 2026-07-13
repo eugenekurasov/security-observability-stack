@@ -1,7 +1,7 @@
 # OpenTelemetry Collector Builder (OCB) manifest.
 #
 # Produces a single collector binary (otelcol-security) that includes:
-#   - k8sapilogreceiver  — local custom component (this repo)
+#   - k8spodlogreceiver  — local custom component (this repo)
 #   - k8seventsreceiver  — Kubernetes Event objects (contrib)
 #   - prometheusreceiver — pod metrics scraping (contrib)
 #   - otlpreceiver       — trace/metric/log ingestion from apps (core)
@@ -10,7 +10,7 @@
 #   - memorylimiterprocessor — protect collector from OOM (core)
 #
 # IMPORTANT: all version numbers below must stay in sync with the versions
-# in k8sapilogreceiver/go.mod. Mismatches are the most common build failure
+# in k8spodlogreceiver/go.mod. Mismatches are the most common build failure
 # when updating the collector release.
 #
 # As of v0.156.0 the stable modules (component, consumer, pdata, receiver)
@@ -37,8 +37,8 @@ receivers:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver v0.156.0
   # Local module — path is relative to this file. The version label (v0.0.1)
   # is a placeholder; OCB uses the local path, not the registry.
-  - gomod: github.com/eugenekurasov/security-observability-stack/otel-components/k8sapilogreceiver v0.0.1
-    path: ./k8sapilogreceiver
+  - gomod: github.com/eugenekurasov/security-observability-stack/otel-components/k8spodlogreceiver v0.0.1
+    path: ./k8spodlogreceiver
 
 processors:
   - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.156.0

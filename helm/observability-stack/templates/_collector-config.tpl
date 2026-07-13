@@ -12,7 +12,7 @@ Consumed by configmap.yaml via:  {{ include "observability-stack.collectorConfig
 {{- if eq .Values.mode "cluster" }}{{- $targetNs = list }}{{- end -}}
 receivers:
 {{- if .Values.signals.logs.enabled }}
-  k8sapilog:
+  k8s_podlog:
     namespaces: {{ $targetNs | toJson }}
     pod_label_selector: {{ .Values.signals.logs.podLabelSelector | quote }}
     since_seconds: {{ .Values.signals.logs.sinceSeconds }}
@@ -22,9 +22,6 @@ receivers:
       initial_interval: {{ .Values.collector.reconnectBackoff.initialInterval }}
       max_interval: {{ .Values.collector.reconnectBackoff.maxInterval }}
       max_elapsed_time: {{ .Values.collector.reconnectBackoff.maxElapsedTime }}
-    rate_limit:
-      qps: {{ .Values.collector.rateLimit.qps }}
-      burst: {{ .Values.collector.rateLimit.burst }}
 {{- end }}
 {{- if .Values.signals.metrics.enabled }}
   prometheus:
@@ -165,7 +162,7 @@ service:
   pipelines:
 {{- if .Values.signals.logs.enabled }}
     logs:
-      receivers: [k8sapilog]
+      receivers: [k8s_podlog]
       {{- if .Values.signals.selfMonitoring.enabled }}
       processors: [k8sattributes]
       {{- end }}

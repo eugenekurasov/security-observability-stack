@@ -61,7 +61,7 @@ signals:
     #                     (node pressure, PV binding, etc.) are collected.
     #
     # Uses k8seventsreceiver from opentelemetry-collector-contrib — no custom
-    # component required. The collector image does not need k8sapilogreceiver
+    # component required. The collector image does not need k8spodlogreceiver
     # for this signal type.
 
   traces:
@@ -79,10 +79,10 @@ signals:
     metricsPort: 8888
 
 collector:
-  # Must be a custom OCB-built image that includes k8sapilogreceiver.
+  # Must be a custom OCB-built image that includes k8spodlogreceiver.
   # The upstream otel/opentelemetry-collector-contrib image works for
-  # metrics and traces but does not include k8sapilogreceiver.
-  # See otel-components/k8sapilogreceiver and the planned OCB manifest.
+  # metrics and traces but does not include k8spodlogreceiver.
+  # See otel-components/k8spodlogreceiver and the planned OCB manifest.
   image:
     repository: ghcr.io/eugenekurasov/security-observability-stack/collector
     tag: "0.1.0"
@@ -105,11 +105,6 @@ collector:
     endpoint: "otel-gateway:4317"
     tls:
       insecure: true
-
-  # Kubernetes API rate limiting for log stream connections.
-  rateLimit:
-    qps: 5
-    burst: 10
 
   reconnectBackoff:
     initialInterval: 1s
