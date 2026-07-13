@@ -27,7 +27,7 @@ Requires Docker running and [`kind`](https://kind.sigs.k8s.io/):
 brew install kind
 kind create cluster --name k8spodlog-test --image kindest/node:v1.34.8
 cd otel-components/k8spodlogreceiver
-go test -v -tags integration -timeout 120s ./...
+go test -v -tags integration -timeout 180s ./...
 kind delete cluster --name k8spodlog-test
 ```
 
