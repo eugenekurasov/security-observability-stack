@@ -1,4 +1,4 @@
-name: CI
+name: Lint
 
 on:
   push:
@@ -10,31 +10,25 @@ on:
     paths:
       - 'otel-components/k8spodlogreceiver/**'
       - '.github/workflows/ci.yml'
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
-  unit-tests:
-    name: Unit tests
+  lint:
+    name: Lint
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: otel-components/k8spodlogreceiver/go.mod
-          cache-dependency-path: otel-components/k8spodlogreceiver/go.sum
-
       - name: Cache vendor
         id: cache-vendor
         uses: actions/cache@v6
         with:
           path: otel-components/k8spodlogreceiver/vendor
           key: ${{ runner.os }}-go-vendor-${{ hashFiles('otel-components/k8spodlogreceiver/go.sum') }}
-
-      - name: Vendor dependencies
-        if: steps.cache-vendor.outputs.cache-hit != 'true'
-        working-directory: otel-components/k8spodlogreceiver
-        run: go mod vendor
-
-      - name: Test
-        working-directory: otel-components/k8spodlogreceiver
-        run: go test -v -mod=vendor ./...
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: otel-components/k8spodlogreceiver/go.mod
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          working-directory: otel-components/k8spodlogreceiver
