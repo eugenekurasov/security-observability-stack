@@ -1,5 +1,5 @@
 [![CI](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/ci.yml)
-[![K8s compability tests](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/integration.yml/badge.svg?branch=main)](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/integration.yml)
+[![K8s compatibility tests](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/integration.yml/badge.svg?branch=main)](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/integration.yml)
 [![Lint](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/lint.yml)
 
 
