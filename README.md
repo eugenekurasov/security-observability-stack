@@ -9,8 +9,8 @@ A Helm chart and custom OpenTelemetry Collector receiver for
 compliance-oriented, multi-tenant observability on Kubernetes —
 built for regulated environments (finance, healthcare) and serverless
 platforms (AWS Fargate, GKE Autopilot, AKS Virtual Nodes) where
-DaemonSets are unavailable, host access is restricted, and tenant isolation
-is a first-class requirement.
+DaemonSets are restricted or unavailable, host access is limited by design,
+and tenant isolation is a first-class requirement.
 
 ## Why this exists
 
@@ -18,8 +18,10 @@ Most observability stacks are built for a single-tenant, low-compliance
 default: broad RBAC, host-level log access via DaemonSets, and no
 built-in mapping to controls like SOC 2. Retrofitting compliance
 onto that default is expensive and error-prone. DaemonSet-based collectors
-also fail entirely on serverless node pools — Fargate, GKE Autopilot, and
-AKS Virtual Nodes block DaemonSets and hostPath mounts by design.
+also run into trouble on serverless node pools: Fargate blocks DaemonSets
+outright, AKS Virtual Nodes exclude them from ACI-backed nodes, and GKE
+Autopilot allows them only under tight resource limits with no write
+access to the host filesystem.
 
 This project takes the opposite approach: start from RBAC-scoped,
 no-host-access collection and tenant isolation, then layer standard
@@ -31,10 +33,20 @@ The core component, `k8spodlogreceiver`, provides a working implementation
 of the API-server-based log collection mode discussed in
 [open-telemetry/opentelemetry-collector-contrib#23339](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/23339)
 — an approach raised in that thread as an alternative to hostPath-based
-collection, but never implemented. On serverless Kubernetes platforms
-(EKS Fargate, GKE Autopilot, AKS Virtual Nodes), where DaemonSets and
-hostPath mounts are unavailable by design, API-based collection is not an
-alternative but the only viable path.
+collection, but never implemented. Each serverless platform blocks the
+DaemonSet/hostPath approach differently:
+
+| Platform | What's blocked | API-based approach | Source |
+|---|---|---|---|
+| **AWS Fargate** | DaemonSets aren't supported at all | Deployment + API server, no per-node agent | [AWS EKS docs](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html) |
+| **AKS Virtual Nodes** | DaemonSets won't deploy pods to virtual nodes | Same Deployment, no node-resident collector needed | [Microsoft Learn](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes) |
+| **GKE Autopilot** | `hostPath` is read-only, `/var/log` only; reaching any tainted node type (GPU, spot, etc.) needs an explicit blanket toleration on top of that | No host mount, no DaemonSet, no tolerations to maintain | [GKE Autopilot security](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-security) |
+
+See [Serverless Kubernetes](docs/architecture.md#serverless-kubernetes-fargate-aks-virtual-nodes-gke-autopilot)
+for the full breakdown, including why GKE Autopilot's `/var/log` exception still
+doesn't remove the need for API-based collection. API-based collection sidesteps
+all three constraints — on these platforms it's not an alternative but the only
+viable path.
 
 
 ### Practical benefits over DaemonSet-based collectors
