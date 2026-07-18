@@ -17,7 +17,7 @@ receivers:
     pod_label_selector: {{ .Values.signals.logs.podLabelSelector | quote }}
     since_seconds: {{ .Values.signals.logs.sinceSeconds }}
     api_config:
-      in_cluster: true
+      auth_type: serviceAccount
     reconnect_backoff:
       initial_interval: {{ .Values.collector.reconnectBackoff.initialInterval }}
       max_interval: {{ .Values.collector.reconnectBackoff.maxInterval }}

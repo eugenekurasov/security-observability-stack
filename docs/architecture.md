@@ -229,8 +229,8 @@ kept strictly separate from per-tenant data.
 
 - Single collector replica per tenant — `activeStreams` tracking is in-process only
 - Raw log lines forwarded as-is, one OTel log record per line
-- In-cluster mode only (`api_config.in_cluster: true`); kubeconfig path supported
-  for local development
+- In-cluster mode only (`api_config.auth_type: serviceAccount`); kubeconfig path
+  supported for local development
 
 ### Planned
 
