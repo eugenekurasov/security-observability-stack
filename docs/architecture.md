@@ -149,18 +149,24 @@ to the collector.
 
 ## Serverless Kubernetes (Fargate, AKS Virtual Nodes, GKE Autopilot)
 
-DaemonSet-based log collectors cannot run on serverless Kubernetes node pools:
+DaemonSet-based log collectors run into a different constraint on each serverless
+platform — none of them block collection the same way:
 
-| Platform | Constraint |
-|---|---|
-| **AWS EKS Fargate** | Fargate profiles do not schedule DaemonSet pods — AWS explicitly excludes them |
-| **AKS Virtual Nodes** | ACI-backed virtual nodes do not support DaemonSets or `hostPath` mounts |
-| **GKE Autopilot** | User-defined DaemonSets are blocked; `hostPath` volumes are disallowed |
+| Platform | Constraint | API-based approach (this stack) | Source |
+|---|---|---|---|
+| **AWS Fargate** | DaemonSets aren't supported — each pod runs on its own isolated micro-VM with no shared node to schedule a per-node agent on | Runs as a Deployment, reads via the API server — no per-node agent to schedule | [AWS EKS docs — Fargate](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html) |
+| **AKS Virtual Nodes** | DaemonSets won't deploy pods to virtual nodes — ACI-backed nodes accept only standalone Pods | Same Deployment reaches pods on virtual nodes without needing a node-resident collector | [Microsoft Learn — Virtual nodes](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes) |
+| **GKE Autopilot** | `hostPath` volumes are read-only and restricted to the `/var/log` prefix — no write access, no other paths. Custom DaemonSets are schedulable, but must meet Autopilot's minimum per-Pod resource requests, and Autopilot applies taints to specialized node types (GPU, spot, and others) — reaching those nodes at all requires adding a blanket toleration (`operator: Exists`) to the DaemonSet spec | No host mount, no DaemonSet, no tolerations to maintain — the collector doesn't need to be scheduled onto every node type in the first place | [GKE Autopilot security](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-security), [Resource requests in Autopilot](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests), [Deploy GPU workloads in Autopilot](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/autopilot-gpus) |
 
 This stack has no such constraint. The collector runs as a standard **Deployment**
 in any schedulable node pool, and reads logs through the Kubernetes API — the same
 endpoint available regardless of whether tenant workloads run on Fargate, virtual
 nodes, or standard nodes.
+
+GKE Autopilot's read-only `/var/log` exception doesn't close the gap: it grants
+node-wide read access to every pod's logs on that node, which is exactly the broad,
+un-scoped host access this project is designed to avoid — not a substitute for
+RBAC-scoped, per-tenant collection through the API server.
 
 Mixed-mode clusters (part serverless, part standard nodes) are the most common
 case where this matters: run the collector on a standard node and collect from pods
