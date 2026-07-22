@@ -349,7 +349,7 @@ func (r *logsReceiver) streamContainerLogs(ctx context.Context, namespace, podNa
 		reconnectStartTime = time.Time{}
 		backoff = r.cfg.ReconnectBackoff.InitialInterval
 
-		scanErr, lastTS := r.streamConnection(ctx, stream, batchMeta{
+		lastTS, scanErr := r.streamConnection(ctx, stream, batchMeta{
 			namespace:     namespace,
 			podName:       podName,
 			podUID:        podUID,
@@ -435,7 +435,7 @@ func (b *logBatch) append(line string, ts time.Time) {
 	b.count++
 }
 
-func (r *logsReceiver) streamConnection(ctx context.Context, stream io.Reader, m batchMeta) (scanErr error, lastTS time.Time) {
+func (r *logsReceiver) streamConnection(ctx context.Context, stream io.Reader, m batchMeta) (lastTS time.Time, scanErr error) {
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
@@ -485,7 +485,7 @@ func (r *logsReceiver) streamConnection(ctx context.Context, stream io.Reader, m
 			if !ok {
 				flush()
 				<-readerDone // scanErr is fully written before readerDone closes
-				return scanErr, lastTS
+				return lastTS, scanErr
 			}
 			batch.append(item.line, item.ts)
 			if !item.ts.IsZero() {

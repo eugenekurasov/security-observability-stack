@@ -343,7 +343,7 @@ func TestStreamConnection_BatchesLinesBySize(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		b.WriteString("line\n")
 	}
-	scanErr, _ := r.streamConnection(context.Background(), strings.NewReader(b.String()),
+	_, scanErr := r.streamConnection(context.Background(), strings.NewReader(b.String()),
 		batchMeta{namespace: "ns", podName: "pod", podUID: "uid", containerName: "c"})
 
 	require.NoError(t, scanErr)
@@ -373,7 +373,7 @@ func TestStreamConnection_FlushesPartialBatchByInterval(t *testing.T) {
 		_ = pw.Close()
 	}()
 
-	scanErr, _ := r.streamConnection(context.Background(), pr,
+	_, scanErr := r.streamConnection(context.Background(), pr,
 		batchMeta{namespace: "ns", podName: "pod", podUID: "uid", containerName: "c"})
 
 	require.NoError(t, scanErr)
@@ -390,7 +390,7 @@ func TestStreamConnection_AdvancesCursorToLastTimestampOnSuccess(t *testing.T) {
 	}
 
 	input := "2024-01-15T10:00:04.900000000Z a\n2024-01-15T10:00:05.800000000Z b\n"
-	_, lastTS := r.streamConnection(context.Background(), strings.NewReader(input),
+	lastTS, _ := r.streamConnection(context.Background(), strings.NewReader(input),
 		batchMeta{namespace: "ns", podName: "pod", podUID: "uid", containerName: "c"})
 
 	want, err := time.Parse(time.RFC3339Nano, "2024-01-15T10:00:05.800000000Z")
@@ -410,7 +410,7 @@ func TestStreamConnection_FailedConsumeDoesNotAdvanceCursor(t *testing.T) {
 	}
 
 	input := "2024-01-15T10:00:04.900000000Z a\n2024-01-15T10:00:05.800000000Z b\n"
-	_, lastTS := r.streamConnection(context.Background(), strings.NewReader(input),
+	lastTS, _ := r.streamConnection(context.Background(), strings.NewReader(input),
 		batchMeta{namespace: "ns", podName: "pod", podUID: "uid", containerName: "c"})
 
 	assert.True(t, lastTS.IsZero(), "cursor must not advance when the consumer rejects the batch")
