@@ -40,6 +40,15 @@ signals:
     # Kubernetes label selector to restrict which pods are tailed.
     # Example: "app.kubernetes.io/part-of=payments"
     podLabelSelector: ""
+    # Max number of log lines coalesced into a single pipeline push per
+    # container stream. Batching amortizes per-line overhead at high line
+    # rates (e.g. 10k lines/sec) instead of one push per line. Larger values
+    # hold more memory per in-flight batch. 0 = use the receiver default (1000).
+    maxBatchSize: 1000
+    # Max time a partially-filled batch waits before being forwarded, so a
+    # low-volume stream isn't held back until it fills maxBatchSize lines.
+    # 0 = use the receiver default (200ms).
+    flushInterval: 200ms
 
   metrics:
     enabled: true
@@ -110,4 +119,5 @@ collector:
   reconnectBackoff:
     initialInterval: 1s
     maxInterval: 30s
+    # Total time to keep retrying a failing stream before giving up; 0 = retry forever.
     maxElapsedTime: 5m

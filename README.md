@@ -218,7 +218,8 @@ is only required for container log collection.
 
 - [ ] **Benchmark test** - prepare a benchmark test for the new component.
 
-- [ ] **Node metrics: direct kubelet scraping** — In cluster mode the node scrape jobs currently route through the API server proxy (`/api/v1/nodes/$1/proxy/metrics`, `/api/v1/nodes/$1/proxy/metrics/cadvisor`). At scale every Prometheus scrape of every node passes through the control plane. Switch to direct kubelet scraping on port 10250 (same pattern as `kube-prometheus-stack`) to remove the API server from the node metrics path entirely. Possibly out of scope — feedback welcome
+- [ ] **Node metrics: direct kubelet scraping** — In cluster mode the node scrape jobs currently route through the API server proxy (`/api/v1/nodes/$1/proxy/metrics`, `/api/v1/nodes/$1/proxy/metrics/cadvisor`). At scale every Prometheus scrape of every node passes through the control plane. Switch to direct kubelet scraping on port 10250 (same pattern as `kube-prometheus-stack`) to remove the API server from the node metrics path entirely. **So it actually isn’t tied to `k8spodlogreceiver`; it could be implemented by another component in the future, such as a `kubeletpodlogreceiver`.** — feedback welcome
+
 
 ## Status
 
