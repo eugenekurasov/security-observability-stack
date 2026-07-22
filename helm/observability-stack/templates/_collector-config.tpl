@@ -22,6 +22,8 @@ receivers:
       initial_interval: {{ .Values.collector.reconnectBackoff.initialInterval }}
       max_interval: {{ .Values.collector.reconnectBackoff.maxInterval }}
       max_elapsed_time: {{ .Values.collector.reconnectBackoff.maxElapsedTime }}
+    max_batch_size: {{ .Values.signals.logs.maxBatchSize }}
+    flush_interval: {{ .Values.signals.logs.flushInterval }}
 {{- end }}
 {{- if .Values.signals.metrics.enabled }}
   prometheus:
