@@ -49,6 +49,16 @@ signals:
     # low-volume stream isn't held back until it fills maxBatchSize lines.
     # 0 = use the receiver default (200ms).
     flushInterval: 200ms
+    # Max size, in bytes, of a single emitted log record body. Also bounds the
+    # per-stream read buffer so a pathologically long line can't grow memory
+    # without limit. A longer line is handled per maxLogSizeBehavior, never
+    # silently dropped. 0 = use the receiver default (1048576 = 1 MiB).
+    maxLogSize: 1048576
+    # What to do with a log line longer than maxLogSize:
+    #   split    - preserve all data by emitting the line as consecutive
+    #              maxLogSize-sized records (default; nothing is lost).
+    #   truncate - keep the first maxLogSize bytes and drop the rest of the line.
+    maxLogSizeBehavior: split
 
   metrics:
     enabled: true
