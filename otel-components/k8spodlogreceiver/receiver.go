@@ -1,18 +1,15 @@
 package k8spodlogreceiver
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
@@ -33,6 +30,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/eugenekurasov/security-observability-stack/otel-components/k8spodlogreceiver/internal/k8sconfig"
+	"github.com/eugenekurasov/security-observability-stack/otel-components/k8spodlogreceiver/internal/logline"
 	"github.com/eugenekurasov/security-observability-stack/otel-components/k8spodlogreceiver/internal/metadata"
 	"github.com/eugenekurasov/security-observability-stack/otel-components/k8spodlogreceiver/internal/retry"
 	"github.com/eugenekurasov/security-observability-stack/otel-components/k8spodlogreceiver/internal/watch"
@@ -48,8 +46,6 @@ const (
 	reasonRBACDenied = "rbac_denied"
 	reasonPodGone    = "pod_gone"
 	reasonOther      = "other"
-
-	maxLineSize = 1024 * 1024
 )
 
 type logsReceiver struct {
@@ -349,11 +345,11 @@ func (r *logsReceiver) streamContainerLogs(ctx context.Context, namespace, podNa
 		reconnectStartTime = time.Time{}
 		backoff = r.cfg.ReconnectBackoff.InitialInterval
 
-		lastTS, scanErr := r.streamConnection(ctx, stream, batchMeta{
-			namespace:     namespace,
-			podName:       podName,
-			podUID:        podUID,
-			containerName: containerName,
+		lastTS, scanErr := r.streamConnection(ctx, stream, logline.Meta{
+			Namespace:     namespace,
+			PodName:       podName,
+			PodUID:        podUID,
+			ContainerName: containerName,
 		})
 		_ = stream.Close()
 		if !lastTS.IsZero() {
@@ -371,11 +367,11 @@ func (r *logsReceiver) streamContainerLogs(ctx context.Context, namespace, podNa
 
 		if r.isPodTerminal(namespace, podName) {
 			if scanErr != nil {
-				r.drainTerminalLogs(ctx, batchMeta{
-					namespace:     namespace,
-					podName:       podName,
-					podUID:        podUID,
-					containerName: containerName,
+				r.drainTerminalLogs(ctx, logline.Meta{
+					Namespace:     namespace,
+					PodName:       podName,
+					PodUID:        podUID,
+					ContainerName: containerName,
 				}, &lastSeenTimestamp, logger)
 			}
 			logger.Debug("pod is in a terminal phase, stopping log stream")
@@ -388,9 +384,9 @@ func (r *logsReceiver) streamContainerLogs(ctx context.Context, namespace, podNa
 	}
 }
 
-func (r *logsReceiver) drainTerminalLogs(ctx context.Context, m batchMeta, lastSeenTimestamp *time.Time, logger *zap.Logger) {
+func (r *logsReceiver) drainTerminalLogs(ctx context.Context, m logline.Meta, lastSeenTimestamp *time.Time, logger *zap.Logger) {
 	opts := &corev1.PodLogOptions{
-		Container:  m.containerName,
+		Container:  m.ContainerName,
 		Follow:     false,
 		Timestamps: true,
 	}
@@ -399,7 +395,7 @@ func (r *logsReceiver) drainTerminalLogs(ctx context.Context, m batchMeta, lastS
 		opts.SinceTime = &t
 	}
 
-	req := r.clientset.CoreV1().Pods(m.namespace).GetLogs(m.podName, opts)
+	req := r.clientset.CoreV1().Pods(m.Namespace).GetLogs(m.PodName, opts)
 	stream, err := req.Stream(ctx)
 	if err != nil {
 		logger.Debug("final drain of terminal pod logs failed", zap.Error(err))
@@ -413,103 +409,44 @@ func (r *logsReceiver) drainTerminalLogs(ctx context.Context, m batchMeta, lastS
 	}
 }
 
-// Move this to the util package later
-type batchMeta struct {
-	namespace     string
-	podName       string
-	podUID        string
-	containerName string
-}
-
-//Move this to the util package later
-type scannedLine struct {
-	line string
-	ts   time.Time
-}
-
-// Move this to the util package later
-type logBatch struct {
-	logs    plog.Logs
-	records plog.LogRecordSlice
-	count   int
-}
-
-func newLogBatch(m batchMeta) *logBatch {
-	logs := plog.NewLogs()
-	rl := logs.ResourceLogs().AppendEmpty()
-
-	res := rl.Resource()
-	res.Attributes().PutStr("k8s.namespace.name", m.namespace)
-	res.Attributes().PutStr("k8s.pod.name", m.podName)
-	res.Attributes().PutStr("k8s.pod.uid", m.podUID)
-	res.Attributes().PutStr("k8s.container.name", m.containerName)
-
-	sl := rl.ScopeLogs().AppendEmpty()
-	sl.Scope().SetName(metadata.ScopeName)
-
-	return &logBatch{logs: logs, records: sl.LogRecords()}
-}
-
-func (b *logBatch) append(line string, ts time.Time) {
-	lr := b.records.AppendEmpty()
-	if ts.IsZero() {
-		ts = time.Now()
-	}
-	lr.SetTimestamp(pcommon.NewTimestampFromTime(ts))
-	lr.Body().SetStr(line)
-	b.count++
-}
-
-func (r *logsReceiver) streamConnection(ctx context.Context, stream io.Reader, m batchMeta) (lastTS time.Time, scanErr error) {
-	reader := bufio.NewReaderSize(stream, 64*1024)
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
-
+func (r *logsReceiver) streamConnection(_ context.Context, stream io.Reader, m logline.Meta) (lastTS time.Time, scanErr error) {
 	maxBatch := r.batchSize()
 	flushInterval := r.flushInterval()
 
-	lineCh := make(chan scannedLine, maxBatch)
+	behavior := r.logSizeBehavior()
+	maxSize := r.maxLogSize()
+	onOversize := func() {
+		r.settings.Logger.Warn("log line exceeded max size",
+			zap.Int("max_bytes", maxSize),
+			zap.Stringer("behavior", behavior),
+		)
+	}
+	scanner := logline.NewScanner(stream, maxSize, behavior, onOversize)
+
+	lineCh := make(chan logline.Line, maxBatch)
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
 		defer close(lineCh)
-		for {
-			for scanner.Scan() {
-				line := scanner.Text()
-				ts, body := parseLeadingTimestamp(line)
-				lineCh <- scannedLine{line: body, ts: ts}
-			}
-			if scanner.Err() == bufio.ErrTooLong {
-				r.settings.Logger.Warn("log line exceeded max size, discarded and continued on the same stream", zap.Int("max_bytes", maxLineSize))
-				discardOversizedLine(reader)
-				scanner = bufio.NewScanner(reader)
-				scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
-				continue
-			}
-			scanErr = scanner.Err()
-			return
+		for scanner.Scan() {
+			lineCh <- scanner.Line()
 		}
+		scanErr = scanner.Err()
 	}()
 
 	ticker := time.NewTicker(flushInterval)
 	defer ticker.Stop()
 
-	// batchMaxTS is the newest timestamp in the current, not-yet-flushed batch.
-	// lastTS (the returned resume cursor) only advances to it once the batch is
-	// accepted by the consumer — a failed ConsumeLogs must NOT move the cursor,
-	// or the whole dropped batch would be skipped on reconnect (data loss).
-	// Advancing only on success keeps the reconnect at-least-once: a failed
-	// batch is fully re-read (duplicates) rather than lost.
 	var batchMaxTS time.Time
-	batch := newLogBatch(m)
+	batch := logline.NewBatch(m)
 	flush := func() {
-		if batch.count == 0 {
+		if batch.Count() == 0 {
 			return
 		}
-		if r.consumeBatch(batch.logs, batch.count) && !batchMaxTS.IsZero() {
+		if r.consumeBatch(batch.Logs(), batch.Count()) && !batchMaxTS.IsZero() {
 			lastTS = batchMaxTS
 		}
-		batch = newLogBatch(m)
+		batch = logline.NewBatch(m)
 		batchMaxTS = time.Time{}
 	}
 
@@ -521,11 +458,11 @@ func (r *logsReceiver) streamConnection(ctx context.Context, stream io.Reader, m
 				<-readerDone // scanErr is fully written before readerDone closes
 				return lastTS, scanErr
 			}
-			batch.append(item.line, item.ts)
-			if !item.ts.IsZero() {
-				batchMaxTS = item.ts
+			batch.Append(item.Body, item.Timestamp)
+			if !item.Timestamp.IsZero() {
+				batchMaxTS = item.Timestamp
 			}
-			if batch.count >= maxBatch {
+			if batch.Count() >= maxBatch {
 				flush()
 				ticker.Reset(flushInterval)
 			}
@@ -535,10 +472,6 @@ func (r *logsReceiver) streamConnection(ctx context.Context, stream io.Reader, m
 	}
 }
 
-// consumeBatch forwards one batch to the pipeline, accounting for all count
-// records in a single obsreport span. It reports whether the consumer accepted
-// the batch (err == nil), so the caller can decide whether to advance the
-// reconnect cursor.
 func (r *logsReceiver) consumeBatch(logs plog.Logs, count int) bool {
 	consumeCtx := context.Background()
 	if r.obsrep != nil {
@@ -555,22 +488,17 @@ func (r *logsReceiver) consumeBatch(logs plog.Logs, count int) bool {
 	return true
 }
 
-// emitLogLine forwards a single line as a one-record batch. Retained as a thin
-// wrapper over the batch primitives for callers/tests that emit one line.
 func (r *logsReceiver) emitLogLine(namespace, podName, podUID, containerName, line string, ts time.Time) {
-	b := newLogBatch(batchMeta{
-		namespace:     namespace,
-		podName:       podName,
-		podUID:        podUID,
-		containerName: containerName,
+	b := logline.NewBatch(logline.Meta{
+		Namespace:     namespace,
+		PodName:       podName,
+		PodUID:        podUID,
+		ContainerName: containerName,
 	})
-	b.append(line, ts)
-	r.consumeBatch(b.logs, b.count)
+	b.Append(line, ts)
+	r.consumeBatch(b.Logs(), b.Count())
 }
 
-// batchSize / flushInterval return the effective batching parameters, falling
-// back to package defaults so a receiver built without a fully-populated Config
-// (as some unit tests do) still behaves sanely.
 func (r *logsReceiver) batchSize() int {
 	if r.cfg != nil && r.cfg.MaxBatchSize > 0 {
 		return r.cfg.MaxBatchSize
@@ -585,6 +513,25 @@ func (r *logsReceiver) flushInterval() time.Duration {
 	return defaultFlushInterval
 }
 
+func (r *logsReceiver) maxLogSize() int {
+	if r.cfg != nil && r.cfg.MaxLogSize > 0 {
+		return r.cfg.MaxLogSize
+	}
+	return defaultMaxLogSize
+}
+
+func (r *logsReceiver) logSizeBehavior() logline.Behavior {
+	if r.cfg == nil {
+		return logline.BehaviorSplit
+	}
+
+	b, err := logline.ParseBehavior(r.cfg.MaxLogSizeBehavior)
+	if err != nil {
+		return logline.BehaviorSplit
+	}
+	return b
+}
+
 // Candidate to be moved to a utility or other package.
 func classifyStreamError(err error) string {
 	switch {
@@ -595,28 +542,4 @@ func classifyStreamError(err error) string {
 	default:
 		return reasonOther
 	}
-}
-
-// Candidate to be moved to a utility or other package.
-func discardOversizedLine(r *bufio.Reader) {
-	for {
-		_, err := r.ReadSlice('\n')
-		if err == bufio.ErrBufferFull {
-			continue // newline not reached yet; keep discarding
-		}
-		return // reached the newline, EOF, or an unrecoverable error
-	}
-}
-
-// Candidate to be moved to a utility or other package.
-func parseLeadingTimestamp(line string) (time.Time, string) {
-	idx := strings.IndexByte(line, ' ')
-	if idx < 0 {
-		return time.Time{}, line
-	}
-	ts, err := time.Parse(time.RFC3339Nano, line[:idx])
-	if err != nil {
-		return time.Time{}, line
-	}
-	return ts, line[idx+1:]
 }

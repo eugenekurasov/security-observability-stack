@@ -169,8 +169,8 @@ helm install my-obs helm/observability-stack \
    the signals that are enabled.
 
 3. **Compliance mapping is explicit, not implied.** See
-   `docs/compliance-mapping.md` (planned) for a control-by-control mapping
-   to SOC 2 requirements.
+   [`docs/compliance-mapping.md`](docs/compliance-mapping.md) for a control-by-control
+   mapping to SOC 2 requirements.
 
 4. **Infrastructure and application code are versioned together.**
    Terraform, Helm, and the custom collector build manifest live in one
