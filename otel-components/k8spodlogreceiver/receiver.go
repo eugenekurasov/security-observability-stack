@@ -361,11 +361,7 @@ func (r *logsReceiver) streamContainerLogs(ctx context.Context, namespace, podNa
 		}
 
 		if scanErr != nil {
-			if scanErr == bufio.ErrTooLong {
-				logger.Warn("log line exceeded max size, discarded rest of line before reconnecting", zap.Int("max_bytes", maxLineSize))
-			} else {
-				logger.Debug("log stream ended, reconnecting", zap.Error(scanErr))
-			}
+			logger.Debug("log stream ended, reconnecting", zap.Error(scanErr))
 		}
 
 		if !lastSeenTimestamp.IsZero() {
@@ -374,6 +370,14 @@ func (r *logsReceiver) streamContainerLogs(ctx context.Context, namespace, podNa
 		}
 
 		if r.isPodTerminal(namespace, podName) {
+			if scanErr != nil {
+				r.drainTerminalLogs(ctx, batchMeta{
+					namespace:     namespace,
+					podName:       podName,
+					podUID:        podUID,
+					containerName: containerName,
+				}, &lastSeenTimestamp, logger)
+			}
 			logger.Debug("pod is in a terminal phase, stopping log stream")
 			return
 		}
@@ -384,9 +388,32 @@ func (r *logsReceiver) streamContainerLogs(ctx context.Context, namespace, podNa
 	}
 }
 
-// batchMeta identifies the container stream a batch of log records belongs to.
-// Every record in a single stream shares the same resource attributes, so they
-// are set once per batch rather than once per line.
+func (r *logsReceiver) drainTerminalLogs(ctx context.Context, m batchMeta, lastSeenTimestamp *time.Time, logger *zap.Logger) {
+	opts := &corev1.PodLogOptions{
+		Container:  m.containerName,
+		Follow:     false,
+		Timestamps: true,
+	}
+	if !lastSeenTimestamp.IsZero() {
+		t := metav1.NewTime(*lastSeenTimestamp)
+		opts.SinceTime = &t
+	}
+
+	req := r.clientset.CoreV1().Pods(m.namespace).GetLogs(m.podName, opts)
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		logger.Debug("final drain of terminal pod logs failed", zap.Error(err))
+		return
+	}
+	defer func() { _ = stream.Close() }()
+
+	lastTS, _ := r.streamConnection(ctx, stream, m)
+	if !lastTS.IsZero() {
+		*lastSeenTimestamp = lastTS
+	}
+}
+
+// Move this to the util package later
 type batchMeta struct {
 	namespace     string
 	podName       string
@@ -394,15 +421,13 @@ type batchMeta struct {
 	containerName string
 }
 
-// scannedLine is a single log line handed from the reader goroutine to the
-// batching loop, carrying its already-parsed leading timestamp.
+//Move this to the util package later
 type scannedLine struct {
 	line string
 	ts   time.Time
 }
 
-// logBatch accumulates log records for one container stream into a single
-// plog.Logs so many lines are forwarded with one ConsumeLogs call.
+// Move this to the util package later
 type logBatch struct {
 	logs    plog.Logs
 	records plog.LogRecordSlice
@@ -436,7 +461,8 @@ func (b *logBatch) append(line string, ts time.Time) {
 }
 
 func (r *logsReceiver) streamConnection(ctx context.Context, stream io.Reader, m batchMeta) (lastTS time.Time, scanErr error) {
-	scanner := bufio.NewScanner(stream)
+	reader := bufio.NewReaderSize(stream, 64*1024)
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 	maxBatch := r.batchSize()
@@ -447,14 +473,22 @@ func (r *logsReceiver) streamConnection(ctx context.Context, stream io.Reader, m
 	go func() {
 		defer close(readerDone)
 		defer close(lineCh)
-		for scanner.Scan() {
-			line := scanner.Text()
-			lineCh <- scannedLine{line: line, ts: parseLeadingTimestamp(line)}
+		for {
+			for scanner.Scan() {
+				line := scanner.Text()
+				ts, body := parseLeadingTimestamp(line)
+				lineCh <- scannedLine{line: body, ts: ts}
+			}
+			if scanner.Err() == bufio.ErrTooLong {
+				r.settings.Logger.Warn("log line exceeded max size, discarded and continued on the same stream", zap.Int("max_bytes", maxLineSize))
+				discardOversizedLine(reader)
+				scanner = bufio.NewScanner(reader)
+				scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
+				continue
+			}
+			scanErr = scanner.Err()
+			return
 		}
-		if scanner.Err() == bufio.ErrTooLong {
-			discardOversizedLine(stream)
-		}
-		scanErr = scanner.Err()
 	}()
 
 	ticker := time.NewTicker(flushInterval)
@@ -564,30 +598,25 @@ func classifyStreamError(err error) string {
 }
 
 // Candidate to be moved to a utility or other package.
-func discardOversizedLine(r io.Reader) {
-	buf := make([]byte, 32*1024)
+func discardOversizedLine(r *bufio.Reader) {
 	for {
-		n, err := r.Read(buf)
-		if err != nil || n == 0 {
-			return
+		_, err := r.ReadSlice('\n')
+		if err == bufio.ErrBufferFull {
+			continue // newline not reached yet; keep discarding
 		}
-		for i := 0; i < n; i++ {
-			if buf[i] == '\n' {
-				return
-			}
-		}
+		return // reached the newline, EOF, or an unrecoverable error
 	}
 }
 
 // Candidate to be moved to a utility or other package.
-func parseLeadingTimestamp(line string) time.Time {
+func parseLeadingTimestamp(line string) (time.Time, string) {
 	idx := strings.IndexByte(line, ' ')
 	if idx < 0 {
-		return time.Time{}
+		return time.Time{}, line
 	}
 	ts, err := time.Parse(time.RFC3339Nano, line[:idx])
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, line
 	}
-	return ts
+	return ts, line[idx+1:]
 }

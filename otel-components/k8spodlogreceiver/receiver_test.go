@@ -1,6 +1,7 @@
 package k8spodlogreceiver
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"strings"
@@ -398,6 +399,32 @@ func TestStreamConnection_AdvancesCursorToLastTimestampOnSuccess(t *testing.T) {
 	assert.True(t, lastTS.Equal(want), "cursor must advance to the newest delivered line, got %v", lastTS)
 }
 
+// TestStreamConnection_StripsTimestampPrefixFromBody guards against the leading
+// RFC3339 timestamp (emitted because PodLogOptions.Timestamps is true) being
+// duplicated into both the record Timestamp and its Body. The emitLogLine tests
+// do not exercise this because they bypass the scan/parse path.
+func TestStreamConnection_StripsTimestampPrefixFromBody(t *testing.T) {
+	sink := &consumertest.LogsSink{}
+	r := &logsReceiver{
+		settings: receivertest.NewNopSettings(metadata.Type),
+		consumer: sink,
+		cfg:      &Config{MaxBatchSize: 10, FlushInterval: time.Hour},
+	}
+
+	input := "2024-01-15T10:00:04.900000000Z hello world\n"
+	_, scanErr := r.streamConnection(context.Background(), strings.NewReader(input),
+		batchMeta{namespace: "ns", podName: "pod", podUID: "uid", containerName: "c"})
+
+	require.NoError(t, scanErr)
+	require.Equal(t, 1, sink.LogRecordCount())
+	rec := sink.AllLogs()[0].ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0)
+	assert.Equal(t, "hello world", rec.Body().Str(), "the timestamp prefix must not appear in the body")
+
+	want, err := time.Parse(time.RFC3339Nano, "2024-01-15T10:00:04.900000000Z")
+	require.NoError(t, err)
+	assert.True(t, rec.Timestamp().AsTime().Equal(want), "the parsed timestamp must still populate the record Timestamp")
+}
+
 // TestStreamConnection_FailedConsumeDoesNotAdvanceCursor guards the reconnect
 // invariant: if the consumer rejects a batch it is dropped, so the resume
 // cursor must stay put — otherwise the dropped lines would be skipped (lost)
@@ -414,6 +441,44 @@ func TestStreamConnection_FailedConsumeDoesNotAdvanceCursor(t *testing.T) {
 		batchMeta{namespace: "ns", podName: "pod", podUID: "uid", containerName: "c"})
 
 	assert.True(t, lastTS.IsZero(), "cursor must not advance when the consumer rejects the batch")
+}
+
+func TestStreamConnection_ResumesAfterOversizedLine(t *testing.T) {
+	sink := &consumertest.LogsSink{}
+	r := &logsReceiver{
+		settings: receivertest.NewNopSettings(metadata.Type),
+		consumer: sink,
+		cfg:      &Config{MaxBatchSize: 10, FlushInterval: time.Hour},
+	}
+
+	oversized := strings.Repeat("x", maxLineSize*2)
+	input := "2024-01-15T10:00:04.900000000Z a\n" +
+		oversized + "\n" +
+		"2024-01-15T10:00:05.800000000Z c\n"
+
+	lastTS, scanErr := r.streamConnection(context.Background(), strings.NewReader(input),
+		batchMeta{namespace: "ns", podName: "pod", podUID: "uid", containerName: "c"})
+
+	require.NoError(t, scanErr, "oversized line must be handled in-stream, not surfaced as an error that triggers a reconnect")
+
+	// The two small lines must be delivered; the oversized one is dropped.
+	assert.Equal(t, 2, sink.LogRecordCount(), "both small lines around the oversized line must be delivered exactly once")
+	var bodies []string
+	for _, ld := range sink.AllLogs() {
+		recs := ld.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords()
+		for i := 0; i < recs.Len(); i++ {
+			bodies = append(bodies, recs.At(i).Body().Str())
+		}
+	}
+	for _, b := range bodies {
+		assert.NotContains(t, b, "xxxx", "the oversized line must not be forwarded")
+	}
+
+	// The cursor must advance past the line that follows the oversized one, so a
+	// later reconnect resumes after it rather than replaying the oversized line.
+	want, err := time.Parse(time.RFC3339Nano, "2024-01-15T10:00:05.800000000Z")
+	require.NoError(t, err)
+	assert.True(t, lastTS.Equal(want), "cursor must advance to the line after the oversized one, got %v", lastTS)
 }
 
 func TestStreamConnection_CancelStopsAndFlushes(t *testing.T) {
@@ -449,20 +514,23 @@ func TestStreamConnection_CancelStopsAndFlushes(t *testing.T) {
 // ---- parseLeadingTimestamp ----
 
 func TestParseLeadingTimestamp_ParsesValidTimestamp(t *testing.T) {
-	ts := parseLeadingTimestamp("2024-01-15T10:30:00.123456789Z log line content")
+	ts, body := parseLeadingTimestamp("2024-01-15T10:30:00.123456789Z log line content")
 	want, err := time.Parse(time.RFC3339Nano, "2024-01-15T10:30:00.123456789Z")
 	require.NoError(t, err)
 	assert.True(t, ts.Equal(want))
+	assert.Equal(t, "log line content", body, "the timestamp prefix must be stripped from the body")
 }
 
 func TestParseLeadingTimestamp_NoSpace(t *testing.T) {
-	ts := parseLeadingTimestamp("nospacehere")
+	ts, body := parseLeadingTimestamp("nospacehere")
 	assert.True(t, ts.IsZero())
+	assert.Equal(t, "nospacehere", body, "a line with no prefix is returned unchanged")
 }
 
 func TestParseLeadingTimestamp_UnparseableTimestamp(t *testing.T) {
-	ts := parseLeadingTimestamp("not-a-timestamp rest of line")
+	ts, body := parseLeadingTimestamp("not-a-timestamp rest of line")
 	assert.True(t, ts.IsZero())
+	assert.Equal(t, "not-a-timestamp rest of line", body, "a line without a valid timestamp is returned unchanged")
 }
 
 // ---- classifyStreamError ----
@@ -538,19 +606,27 @@ func (cr *chunkedReader) Read(p []byte) (int, error) {
 }
 
 func TestDiscardOversizedLine_SkipsRestOfLine(t *testing.T) {
-	// Verify that discardOversizedLine reads until it finds a newline without error.
+	// Verify that discardOversizedLine stops exactly at the newline and leaves the
+	// following line intact for the next read.
 	data := strings.Repeat("x", 5000) + "\n" + "next line\n"
-	reader := newChunkedReader([]byte(data), 1024)
+	reader := bufio.NewReaderSize(newChunkedReader([]byte(data), 1024), 4096)
 
-	// Should not panic or error
 	discardOversizedLine(reader)
+
+	rest, err := reader.ReadString('\n')
+	require.NoError(t, err)
+	assert.Equal(t, "next line\n", rest, "the line after the oversized one must not be swallowed")
 }
 
 func TestDiscardOversizedLine_HandlesMultipleChunks(t *testing.T) {
-	// Verify that discardOversizedLine handles data spanning multiple buffer chunks.
+	// Verify that discardOversizedLine handles an oversized line spanning many
+	// buffer refills and still preserves the line that follows it.
 	data := strings.Repeat("x", 64*1024) + "\n" + "after\n"
-	reader := newChunkedReader([]byte(data), 8192)
+	reader := bufio.NewReaderSize(newChunkedReader([]byte(data), 8192), 4096)
 
-	// Should not panic or error
 	discardOversizedLine(reader)
+
+	rest, err := reader.ReadString('\n')
+	require.NoError(t, err)
+	assert.Equal(t, "after\n", rest, "the line after a multi-chunk oversized line must survive")
 }
