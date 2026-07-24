@@ -3,5 +3,4 @@
 .claude/
 docs/
 helm/
-terraform/
 otel-components/dist/

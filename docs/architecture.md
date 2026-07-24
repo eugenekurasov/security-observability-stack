@@ -255,8 +255,5 @@ kept strictly separate from per-tenant data.
   scraping on port 10250 (same pattern as `kube-prometheus-stack`) to remove the
   API server from the node metrics path.
 
-- **Terraform modules** — Cloud RBAC, namespace provisioning, IAM bindings for
-  EKS/GKE.
-
 - **Compliance mapping** — SOC 2 control-by-control mapping in
   `docs/compliance-mapping.md`.
