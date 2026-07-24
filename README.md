@@ -88,7 +88,6 @@ If node-level telemetry is needed, it belongs in a separate cluster-operator-man
 | Helm chart | [`helm/observability-stack/`](helm/observability-stack/) | Available |
 | `k8spodlogreceiver` | [`otel-components/k8spodlogreceiver/`](otel-components/k8spodlogreceiver/) | Development / proof-of-concept |
 | Examples | [`examples/`](examples/) | Available |
-| Terraform modules | `terraform/` | Planned |
 | Compliance mapping | [`docs/compliance-mapping.md`](docs/compliance-mapping.md) | Available |
 
 ### Examples
@@ -173,8 +172,8 @@ helm install my-obs helm/observability-stack \
    mapping to SOC 2 requirements.
 
 4. **Infrastructure and application code are versioned together.**
-   Terraform, Helm, and the custom collector build manifest live in one
-   repo so the deployed system is reproducible from source.
+   Helm and the custom collector build manifest live in one repo so the
+   deployed system is reproducible from source.
 
 5. **Zero footprint on specialized nodes.** The collector never schedules
    onto GPU, high-memory, or otherwise tainted nodes. In AI/ML clusters
@@ -213,8 +212,6 @@ is only required for container log collection.
 - [X] **Label filtering** - Maybe we want also to be able filter pod by label. Possibly out of scope — feedback welcome.
 
 - [ ] **Load balancing / HA** - Add load balancing to support running multiple instances concurrently, and configure high availability (HA) so that replication continues if one of the instances fails. Possible `HA` will be implemented similar to K8sLeaderElector in the `k8sclusterreceiver` in the future.
-
-- [ ] **Terraform** - add tf modules for EKS and GKE cluster init with all required combinations.
 
 - [ ] **Benchmark test** - prepare a benchmark test for the new component.
 

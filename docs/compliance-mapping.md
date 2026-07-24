@@ -82,5 +82,5 @@ scope of the observability collection layer:
 
 ## Planned
 
-- Extend with CIS Kubernetes Benchmark controls once Terraform modules
-  (cloud RBAC, network policies) are in place.
+- Extend with CIS Kubernetes Benchmark controls (cloud RBAC, network
+  policies).
