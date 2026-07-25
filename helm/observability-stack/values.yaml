@@ -59,6 +59,12 @@ signals:
     #              maxLogSize-sized records (default; nothing is lost).
     #   truncate - keep the first maxLogSize bytes and drop the rest of the line.
     maxLogSizeBehavior: split
+    # Backoff applied when a per-container log stream fails and is reconnected.
+    reconnectBackoff:
+      initialInterval: 1s
+      maxInterval: 30s
+      # Total time to keep retrying a failing stream before giving up; 0 = retry forever.
+      maxElapsedTime: 5m
 
   metrics:
     enabled: true
@@ -124,10 +130,35 @@ collector:
   export:
     endpoint: "otel-gateway:4317"
     tls:
+      # In-cluster gateway on a plaintext port. Transport security here is
+      # expected to come from the mesh (mTLS) rather than from the exporter.
+      # Set insecure: false and provide ca_file/cert_file when the gateway
+      # terminates TLS itself.
       insecure: true
 
-  reconnectBackoff:
-    initialInterval: 1s
-    maxInterval: 30s
-    # Total time to keep retrying a failing stream before giving up; 0 = retry forever.
-    maxElapsedTime: 5m
+  # Processors applied to every pipeline. Order in the pipeline is fixed by the
+  # template: memory_limiter first (so it can shed load before anything else
+  # buffers), then k8sattributes (when self-monitoring is enabled), then batch
+  # last (so it batches enriched data right before export).
+  processors:
+    # Drops data / applies backpressure when the collector approaches its memory
+    # limit, protecting it from OOMKill. Percentages are of the container memory
+    # limit (collector.resources.limits.memory), read from the cgroup — so these
+    # track automatically if you resize the pod.
+    memoryLimiter:
+      # How often the processor checks current memory usage.
+      checkInterval: 1s
+      # Hard limit: at this % of the memory limit, data is refused until usage drops.
+      limitPercentage: 80
+      # Spike headroom subtracted from the hard limit to get the soft limit, so
+      # a sudden burst between checks still leaves room before the hard limit.
+      spikeLimitPercentage: 25
+    # Groups records into fewer, larger export requests, amortizing per-request
+    # overhead on the exporter and the downstream gateway.
+    batch:
+      # Max time a partial batch waits before being sent.
+      timeout: 5s
+      # Soft target batch size; a batch is sent once it reaches this many records.
+      sendBatchSize: 8192
+      # Hard cap that splits oversized batches; 0 = no upper bound.
+      sendBatchMaxSize: 0

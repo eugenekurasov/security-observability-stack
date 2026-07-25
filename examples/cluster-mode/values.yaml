@@ -24,6 +24,10 @@ signals:
     # No label selector — collect from every pod in the cluster,
     # including GPU inference pods in the inference namespace.
     podLabelSelector: ""
+    reconnectBackoff:
+      initialInterval: 1s
+      maxInterval: 30s
+      maxElapsedTime: 5m
 
   metrics:
     enabled: true
@@ -73,8 +77,3 @@ collector:
     # Higher QPS budget for cluster-wide pod counts.
     qps: 20
     burst: 40
-
-  reconnectBackoff:
-    initialInterval: 1s
-    maxInterval: 30s
-    maxElapsedTime: 5m

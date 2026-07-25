@@ -19,9 +19,9 @@ receivers:
     api_config:
       auth_type: serviceAccount
     reconnect_backoff:
-      initial_interval: {{ .Values.collector.reconnectBackoff.initialInterval }}
-      max_interval: {{ .Values.collector.reconnectBackoff.maxInterval }}
-      max_elapsed_time: {{ .Values.collector.reconnectBackoff.maxElapsedTime }}
+      initial_interval: {{ .Values.signals.logs.reconnectBackoff.initialInterval }}
+      max_interval: {{ .Values.signals.logs.reconnectBackoff.maxInterval }}
+      max_elapsed_time: {{ .Values.signals.logs.reconnectBackoff.maxElapsedTime }}
     max_batch_size: {{ .Values.signals.logs.maxBatchSize }}
     flush_interval: {{ .Values.signals.logs.flushInterval }}
     max_log_size: {{ int64 .Values.signals.logs.maxLogSize }}
@@ -126,9 +126,17 @@ receivers:
     {{- end }}
 {{- end }}
 
-{{- if .Values.signals.selfMonitoring.enabled }}
 
 processors:
+  memory_limiter:
+    check_interval: {{ .Values.collector.processors.memoryLimiter.checkInterval }}
+    limit_percentage: {{ .Values.collector.processors.memoryLimiter.limitPercentage }}
+    spike_limit_percentage: {{ .Values.collector.processors.memoryLimiter.spikeLimitPercentage }}
+  batch:
+    timeout: {{ .Values.collector.processors.batch.timeout }}
+    send_batch_size: {{ .Values.collector.processors.batch.sendBatchSize }}
+    send_batch_max_size: {{ .Values.collector.processors.batch.sendBatchMaxSize }}
+{{- if .Values.signals.selfMonitoring.enabled }}
   k8sattributes:
     auth_type: serviceAccount
     extract:
@@ -167,39 +175,31 @@ service:
 {{- if .Values.signals.logs.enabled }}
     logs:
       receivers: [k8s_podlog]
-      {{- if .Values.signals.selfMonitoring.enabled }}
-      processors: [k8sattributes]
-      {{- end }}
+      processors: [memory_limiter{{ if .Values.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
       exporters: [otlp]
 {{- end }}
 {{- if .Values.signals.metrics.enabled }}
     metrics:
       receivers: [prometheus]
-      {{- if .Values.signals.selfMonitoring.enabled }}
-      processors: [k8sattributes]
-      {{- end }}
+      processors: [memory_limiter{{ if .Values.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
       exporters: [otlp]
 {{- end }}
 {{- if .Values.signals.events.enabled }}
     logs/events:
       receivers: [k8s_events]
-      {{- if .Values.signals.selfMonitoring.enabled }}
-      processors: [k8sattributes]
-      {{- end }}
+      processors: [memory_limiter{{ if .Values.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
       exporters: [otlp]
 {{- end }}
 {{- if .Values.signals.traces.enabled }}
     traces:
       receivers: [otlp]
-      {{- if .Values.signals.selfMonitoring.enabled }}
-      processors: [k8sattributes]
-      {{- end }}
+      processors: [memory_limiter{{ if .Values.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
       exporters: [otlp]
 {{- end }}
 {{- if .Values.signals.selfMonitoring.enabled }}
     metrics/k8s:
       receivers: [k8s_cluster]
-      processors: [k8sattributes]
+      processors: [memory_limiter, k8sattributes, batch]
       exporters: [otlp]
 {{- end }}
 {{- end }}

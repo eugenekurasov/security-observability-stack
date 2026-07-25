@@ -33,6 +33,10 @@ signals:
     # Collect only pods that belong to the payments platform.
     # Remove this to collect all pods in the namespace.
     podLabelSelector: "app.kubernetes.io/part-of=payments-platform"
+    reconnectBackoff:
+      initialInterval: 1s
+      maxInterval: 30s
+      maxElapsedTime: 5m
 
   metrics:
     enabled: true
@@ -81,8 +85,3 @@ collector:
   rateLimit:
     qps: 5
     burst: 10
-
-  reconnectBackoff:
-    initialInterval: 1s
-    maxInterval: 30s
-    maxElapsedTime: 5m
