@@ -1,0 +1,30 @@
+{{ include "observability-stack.fullname" . }} installed in namespace {{ .Release.Namespace }}.
+
+Deployment mode: {{ .Values.mode }}
+{{- if eq .Values.mode "namespace" }}  (watching: {{ join ", " (default (list .Release.Namespace) .Values.namespaces) }}){{- end }}
+
+Collector groups (one Deployment each):
+{{- range $g := (include "observability-stack.groups" . | fromYamlArray) }}
+{{- $v := include "observability-stack.groupValues" (dict "root" $ "group" $g) | fromYaml }}
+  • {{ include "observability-stack.groupFullname" (dict "root" $ "group" $g) }}
+      signals:  {{ join ", " $g.signals }}
+      replicas: {{ $v.collector.replicas }}
+{{- if has "traces" $g.signals }}
+      service:  {{ include "observability-stack.groupFullname" (dict "root" $ "group" $g) }}:{{ $v.signals.traces.grpcPort }} (OTLP gRPC), :{{ $v.signals.traces.httpPort }} (OTLP HTTP)
+{{- end }}
+{{- end }}
+
+All signals export to: {{ .Values.collector.export.endpoint }}
+{{- if not .Values.collectorGroups }}
+
+Running as a single all-in-one collector. To split signals across separately
+sized Deployments (e.g. isolate a scaled-out logs group from the singleton
+scrapers), set `collectorGroups` in values — see values.yaml for an example.
+{{- end }}
+
+Verify:
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+{{- if .Values.signals.selfMonitoring.enabled }}
+  kubectl -n {{ .Release.Namespace }} port-forward deploy/{{ include "observability-stack.groupFullname" (dict "root" $ "group" (first (include "observability-stack.groups" . | fromYamlArray))) }} {{ .Values.signals.selfMonitoring.metricsPort }}
+  # then: curl localhost:{{ .Values.signals.selfMonitoring.metricsPort }}/metrics
+{{- end }}

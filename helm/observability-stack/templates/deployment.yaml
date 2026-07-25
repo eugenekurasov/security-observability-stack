@@ -1,28 +1,35 @@
+{{- $root := . -}}
+{{- range $g := (include "observability-stack.groups" . | fromYamlArray) }}
+{{- $v := include "observability-stack.groupValues" (dict "root" $root "group" $g) | fromYaml }}
+{{- $signals := $g.signals }}
+{{- $fullname := include "observability-stack.groupFullname" (dict "root" $root "group" $g) }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "observability-stack.fullname" . }}-collector
-  namespace: {{ .Release.Namespace }}
+  name: {{ $fullname }}
+  namespace: {{ $root.Release.Namespace }}
   labels:
-    {{- include "observability-stack.labels" . | nindent 4 }}
+    {{- include "observability-stack.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $g.name }}
 spec:
-  replicas: {{ .Values.collector.replicas }}
+  replicas: {{ $v.collector.replicas }}
   selector:
     matchLabels:
-      {{- include "observability-stack.selectorLabels" . | nindent 6 }}
+      {{- include "observability-stack.groupSelectorLabels" (dict "root" $root "group" $g) | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "observability-stack.selectorLabels" . | nindent 8 }}
+        {{- include "observability-stack.groupSelectorLabels" (dict "root" $root "group" $g) | nindent 8 }}
       annotations:
-        checksum/config: {{ include "observability-stack.collectorConfig" . | sha256sum }}
-        {{- if .Values.signals.selfMonitoring.enabled }}
+        checksum/config: {{ include "observability-stack.collectorConfig" (dict "root" $root "values" $v "signals" $signals) | sha256sum }}
+        {{- if $v.signals.selfMonitoring.enabled }}
         prometheus.io/scrape: "true"
-        prometheus.io/port: {{ .Values.signals.selfMonitoring.metricsPort | quote }}
+        prometheus.io/port: {{ $v.signals.selfMonitoring.metricsPort | quote }}
         prometheus.io/path: "/metrics"
         {{- end }}
     spec:
-      serviceAccountName: {{ include "observability-stack.serviceAccountName" . }}
+      serviceAccountName: {{ include "observability-stack.serviceAccountName" $root }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -30,8 +37,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: collector
-          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
-          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          image: "{{ $v.collector.image.repository }}:{{ $v.collector.image.tag }}"
+          imagePullPolicy: {{ $v.collector.image.pullPolicy }}
           args: ["--config=/etc/otelcol/collector.yaml"]
           securityContext:
             allowPrivilegeEscalation: false
@@ -51,19 +58,19 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          {{- if or .Values.signals.traces.enabled .Values.signals.selfMonitoring.enabled }}
+          {{- if or (has "traces" $signals) $v.signals.selfMonitoring.enabled }}
           ports:
-            {{- if .Values.signals.traces.enabled }}
+            {{- if has "traces" $signals }}
             - name: otlp-grpc
-              containerPort: {{ .Values.signals.traces.grpcPort }}
+              containerPort: {{ $v.signals.traces.grpcPort }}
               protocol: TCP
             - name: otlp-http
-              containerPort: {{ .Values.signals.traces.httpPort }}
+              containerPort: {{ $v.signals.traces.httpPort }}
               protocol: TCP
             {{- end }}
-            {{- if .Values.signals.selfMonitoring.enabled }}
+            {{- if $v.signals.selfMonitoring.enabled }}
             - name: telemetry
-              containerPort: {{ .Values.signals.selfMonitoring.metricsPort }}
+              containerPort: {{ $v.signals.selfMonitoring.metricsPort }}
               protocol: TCP
             {{- end }}
           {{- end }}
@@ -72,8 +79,9 @@ spec:
               mountPath: /etc/otelcol
               readOnly: true
           resources:
-            {{- toYaml .Values.collector.resources | nindent 12 }}
+            {{- toYaml $v.collector.resources | nindent 12 }}
       volumes:
         - name: collector-config
           configMap:
-            name: {{ include "observability-stack.fullname" . }}-collector
+            name: {{ $fullname }}
+{{- end }}

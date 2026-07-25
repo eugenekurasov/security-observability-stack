@@ -74,6 +74,11 @@ signals:
     scrapeInterval: 30s
     # Cluster mode only: also collect kubelet / cAdvisor metrics from nodes.
     scrapeNodes: true
+    # Collect cluster-inventory metrics (pod/deployment/node counts, phases,
+    # conditions) via k8sclusterreceiver. This is a singleton receiver — it
+    # lives with the `metrics` signal and must not be duplicated across groups,
+    # so it renders only in the group that owns `metrics`.
+    cluster: true
 
   events:
     enabled: true
@@ -103,6 +108,81 @@ signals:
     # the collector will scrape itself automatically via the prometheus
     # receiver (the pod carries the prometheus.io/scrape annotation).
     metricsPort: 8888
+
+# Debug/diagnostics extensions exposed by the collector process.
+#
+# Both are OFF by default. They expose collector/process internals —
+# Go runtime profiles (CPU, heap, goroutine dumps) and live pipeline
+# state — to anyone who can reach the port, with no authentication. Treat
+# them like a debugger: enable deliberately, and reach them over
+# `kubectl port-forward`, not a Service.
+#
+# The endpoints default to localhost so they are only reachable from
+# inside the pod. Point them at 0.0.0.0 only if you understand that it
+# makes the profiles readable to any workload that can route to the pod.
+diagnostics:
+  # Go performance profiling (net/http/pprof): CPU, heap, goroutine,
+  # block, and mutex profiles. Use it to diagnose leaks or hot paths, e.g.
+  #   kubectl port-forward <pod> 1777:1777
+  #   go tool pprof http://localhost:1777/debug/pprof/heap
+  pprof:
+    enabled: false
+    endpoint: localhost:1777
+  # zPages: live, in-process HTML debug pages — pipeline/component health
+  # and recently sampled traces — served over HTTP. After port-forwarding,
+  # browse http://localhost:55679/debug/servicez (and /debug/pipelinez,
+  # /debug/tracez, /debug/extensionz).
+  zpages:
+    enabled: false
+    endpoint: localhost:55679
+
+# Collector deployment topology.
+#
+# A "group" is one collector Deployment. Each group OWNS a disjoint subset of
+# the ownership signals (logs, metrics, events, traces) and runs a minimal
+# config containing only those receivers/pipelines. This lets a large tenant
+# split signals across separate, independently-sized Deployments — e.g. keep
+# the singleton scrapers (metrics, events) in one pod while logs run in their
+# own pod that can be scaled/sharded — instead of one all-in-one collector.
+#
+# Leave empty for the common case: a single group named "collector" is
+# synthesized automatically, owning every signal whose `signals.*.enabled`
+# flag above is true. That is the small-cluster, one-Deployment setup.
+#
+# Each group entry:
+#   name      — group name; becomes the Deployment name suffix and the
+#               app.kubernetes.io/component label. Must be unique.
+#   signals   — list of ownership signals this group runs. Every signal may be
+#               owned by AT MOST ONE group (the chart fails the render
+#               otherwise, so you can't accidentally double-collect).
+#   overrides — optional. A partial copy of the values above, deep-merged over
+#               the globals for THIS group's pod only. Use it to give a group
+#               its own replicas, resources, per-signal tuning, diagnostics,
+#               etc. Anything not overridden inherits the global default.
+#
+# Note: selfMonitoring is not an ownership signal — it is a per-pod concern, so
+# every group exposes its own telemetry endpoint. mode, namespaces, tenantId,
+# serviceAccount and RBAC stay global (one grant per release, covering the
+# union of all owned signals).
+#
+# Example — split singletons from a scaled-out logs group:
+#
+#   collectorGroups:
+#     - name: singletons
+#       signals: [metrics, events]
+#     - name: logs
+#       signals: [logs]
+#       overrides:
+#         collector:
+#           replicas: 3
+#           resources:
+#             limits:
+#               memory: 1Gi
+#         signals:
+#           logs:
+#             maxBatchSize: 5000
+#
+collectorGroups: []
 
 collector:
   # Must be a custom OCB-built image that includes k8spodlogreceiver.
