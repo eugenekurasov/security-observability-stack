@@ -1,21 +1,27 @@
-{{- if .Values.signals.traces.enabled }}
+{{- $root := . -}}
+{{- range $g := (include "observability-stack.groups" . | fromYamlArray) }}
+{{- if has "traces" $g.signals }}
+{{- $v := include "observability-stack.groupValues" (dict "root" $root "group" $g) | fromYaml }}
+---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "observability-stack.fullname" . }}-collector
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "observability-stack.groupFullname" (dict "root" $root "group" $g) }}
+  namespace: {{ $root.Release.Namespace }}
   labels:
-    {{- include "observability-stack.labels" . | nindent 4 }}
+    {{- include "observability-stack.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $g.name }}
 spec:
   ports:
     - name: otlp-grpc
-      port: {{ .Values.signals.traces.grpcPort }}
+      port: {{ $v.signals.traces.grpcPort }}
       targetPort: otlp-grpc
       protocol: TCP
     - name: otlp-http
-      port: {{ .Values.signals.traces.httpPort }}
+      port: {{ $v.signals.traces.httpPort }}
       targetPort: otlp-http
       protocol: TCP
   selector:
-    {{- include "observability-stack.selectorLabels" . | nindent 4 }}
+    {{- include "observability-stack.groupSelectorLabels" (dict "root" $root "group" $g) | nindent 4 }}
+{{- end }}
 {{- end }}

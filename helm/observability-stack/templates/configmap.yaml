@@ -1,10 +1,17 @@
+{{- include "observability-stack.validateGroups" . -}}
+{{- $root := . -}}
+{{- range $g := (include "observability-stack.groups" . | fromYamlArray) }}
+{{- $v := include "observability-stack.groupValues" (dict "root" $root "group" $g) | fromYaml }}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "observability-stack.fullname" . }}-collector
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "observability-stack.groupFullname" (dict "root" $root "group" $g) }}
+  namespace: {{ $root.Release.Namespace }}
   labels:
-    {{- include "observability-stack.labels" . | nindent 4 }}
+    {{- include "observability-stack.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $g.name }}
 data:
   collector.yaml: |
-{{ include "observability-stack.collectorConfig" . | indent 4 }}
+{{ include "observability-stack.collectorConfig" (dict "root" $root "values" $v "signals" $g.signals) | indent 4 }}
+{{- end }}

@@ -1,37 +1,49 @@
 {{/*
-Builds the OTel Collector YAML config.
+Builds one collector's YAML config for a single group.
 
-Receivers, processors, pipelines, and (in cluster mode) scrape jobs are all
-gated on the corresponding signals.* flag so the config is minimal by default
-and RBAC stays tight — only permissions actually needed are granted.
+Called with a dict:
+  root    — the chart root context (.)
+  values  — the group's effective values (global overlaid with group overrides)
+  signals — the list of ownership signals this group owns (subset of
+            logs, metrics, events, traces)
 
-Consumed by configmap.yaml via:  {{ include "observability-stack.collectorConfig" . | indent 4 }}
+Receivers/pipelines render only for the signals this group owns, so each
+group's pod runs a minimal config. selfMonitoring is not an ownership signal:
+it is a per-pod concern (this collector exposes its own telemetry + enriches
+via k8sattributes) and renders for every group whose effective values enable
+it. Extensions render per pod from the effective diagnostics block.
+
+Consumed by configmap.yaml via:
+  include "observability-stack.collectorConfig" (dict "root" $root "values" $v "signals" $g.signals)
 */}}
 {{- define "observability-stack.collectorConfig" -}}
-{{- $targetNs := default (list .Release.Namespace) .Values.namespaces -}}
-{{- if eq .Values.mode "cluster" }}{{- $targetNs = list }}{{- end -}}
+{{- $root := .root -}}
+{{- $v := .values -}}
+{{- $signals := .signals -}}
+{{- $targetNs := default (list $root.Release.Namespace) $v.namespaces -}}
+{{- if eq $v.mode "cluster" }}{{- $targetNs = list }}{{- end -}}
 receivers:
-{{- if .Values.signals.logs.enabled }}
+{{- if has "logs" $signals }}
   k8s_podlog:
     namespaces: {{ $targetNs | toJson }}
-    pod_label_selector: {{ .Values.signals.logs.podLabelSelector | quote }}
-    since_seconds: {{ .Values.signals.logs.sinceSeconds }}
+    pod_label_selector: {{ $v.signals.logs.podLabelSelector | quote }}
+    since_seconds: {{ $v.signals.logs.sinceSeconds }}
     api_config:
       auth_type: serviceAccount
     reconnect_backoff:
-      initial_interval: {{ .Values.signals.logs.reconnectBackoff.initialInterval }}
-      max_interval: {{ .Values.signals.logs.reconnectBackoff.maxInterval }}
-      max_elapsed_time: {{ .Values.signals.logs.reconnectBackoff.maxElapsedTime }}
-    max_batch_size: {{ .Values.signals.logs.maxBatchSize }}
-    flush_interval: {{ .Values.signals.logs.flushInterval }}
-    max_log_size: {{ int64 .Values.signals.logs.maxLogSize }}
-    max_log_size_behavior: {{ .Values.signals.logs.maxLogSizeBehavior | quote }}
+      initial_interval: {{ $v.signals.logs.reconnectBackoff.initialInterval }}
+      max_interval: {{ $v.signals.logs.reconnectBackoff.maxInterval }}
+      max_elapsed_time: {{ $v.signals.logs.reconnectBackoff.maxElapsedTime }}
+    max_batch_size: {{ $v.signals.logs.maxBatchSize }}
+    flush_interval: {{ $v.signals.logs.flushInterval }}
+    max_log_size: {{ int64 $v.signals.logs.maxLogSize }}
+    max_log_size_behavior: {{ $v.signals.logs.maxLogSizeBehavior | quote }}
 {{- end }}
-{{- if .Values.signals.metrics.enabled }}
+{{- if has "metrics" $signals }}
   prometheus:
     config:
       global:
-        scrape_interval: {{ .Values.signals.metrics.scrapeInterval }}
+        scrape_interval: {{ $v.signals.metrics.scrapeInterval }}
       scrape_configs:
         - job_name: k8s-pods
           kubernetes_sd_configs:
@@ -41,7 +53,7 @@ receivers:
                 names: {{ $targetNs | toJson }}
               {{- end }}
           relabel_configs:
-            {{- if .Values.signals.metrics.scrapeAnnotated }}
+            {{- if $v.signals.metrics.scrapeAnnotated }}
             - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
               action: keep
               regex: "true"
@@ -61,7 +73,7 @@ receivers:
               target_label: k8s_pod
             - source_labels: [__meta_kubernetes_pod_container_name]
               target_label: k8s_container
-{{- if and (eq .Values.mode "cluster") .Values.signals.metrics.scrapeNodes }}
+{{- if and (eq $v.mode "cluster") $v.signals.metrics.scrapeNodes }}
         - job_name: k8s-nodes-kubelet
           kubernetes_sd_configs:
             - role: node
@@ -95,23 +107,7 @@ receivers:
               target_label: __metrics_path__
               replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
 {{- end }}
-{{- end }}
-{{- if .Values.signals.events.enabled }}
-  k8s_events:
-    auth_type: serviceAccount
-    {{- if $targetNs }}
-    namespaces: {{ $targetNs | toJson }}
-    {{- end }}
-{{- end }}
-{{- if .Values.signals.traces.enabled }}
-  otlp:
-    protocols:
-      grpc:
-        endpoint: "0.0.0.0:{{ .Values.signals.traces.grpcPort }}"
-      http:
-        endpoint: "0.0.0.0:{{ .Values.signals.traces.httpPort }}"
-{{- end }}
-{{- if .Values.signals.selfMonitoring.enabled }}
+{{- if $v.signals.metrics.cluster }}
   k8s_cluster:
     auth_type: serviceAccount
     collection_interval: 30s
@@ -120,23 +116,39 @@ receivers:
     {{- end }}
     # node_conditions_to_report and allocatable_types_to_report are left
     # empty in namespace mode — those require cluster-scoped node access.
-    {{- if eq .Values.mode "cluster" }}
+    {{- if eq $v.mode "cluster" }}
     node_conditions_to_report: [Ready, MemoryPressure, DiskPressure]
     allocatable_types_to_report: [cpu, memory, storage]
     {{- end }}
+{{- end }}
+{{- end }}
+{{- if has "events" $signals }}
+  k8s_events:
+    auth_type: serviceAccount
+    {{- if $targetNs }}
+    namespaces: {{ $targetNs | toJson }}
+    {{- end }}
+{{- end }}
+{{- if has "traces" $signals }}
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:{{ $v.signals.traces.grpcPort }}"
+      http:
+        endpoint: "0.0.0.0:{{ $v.signals.traces.httpPort }}"
 {{- end }}
 
 
 processors:
   memory_limiter:
-    check_interval: {{ .Values.collector.processors.memoryLimiter.checkInterval }}
-    limit_percentage: {{ .Values.collector.processors.memoryLimiter.limitPercentage }}
-    spike_limit_percentage: {{ .Values.collector.processors.memoryLimiter.spikeLimitPercentage }}
+    check_interval: {{ $v.collector.processors.memoryLimiter.checkInterval }}
+    limit_percentage: {{ $v.collector.processors.memoryLimiter.limitPercentage }}
+    spike_limit_percentage: {{ $v.collector.processors.memoryLimiter.spikeLimitPercentage }}
   batch:
-    timeout: {{ .Values.collector.processors.batch.timeout }}
-    send_batch_size: {{ .Values.collector.processors.batch.sendBatchSize }}
-    send_batch_max_size: {{ .Values.collector.processors.batch.sendBatchMaxSize }}
-{{- if .Values.signals.selfMonitoring.enabled }}
+    timeout: {{ $v.collector.processors.batch.timeout }}
+    send_batch_size: {{ $v.collector.processors.batch.sendBatchSize }}
+    send_batch_max_size: {{ $v.collector.processors.batch.sendBatchMaxSize }}
+{{- if $v.signals.selfMonitoring.enabled }}
   k8sattributes:
     auth_type: serviceAccount
     extract:
@@ -157,49 +169,69 @@ processors:
 
 exporters:
   otlp:
-    endpoint: {{ .Values.collector.export.endpoint | quote }}
+    endpoint: {{ $v.collector.export.endpoint | quote }}
     tls:
-      insecure: {{ .Values.collector.export.tls.insecure }}
+      insecure: {{ $v.collector.export.tls.insecure }}
+
+{{/* Collect enabled diagnostics extensions so both the extensions block and
+     the service.extensions list below stay in sync from one source. */}}
+{{- $extensions := list -}}
+{{- if $v.diagnostics.pprof.enabled }}{{- $extensions = append $extensions "pprof" }}{{- end -}}
+{{- if $v.diagnostics.zpages.enabled }}{{- $extensions = append $extensions "zpages" }}{{- end -}}
+{{- if $extensions }}
+extensions:
+{{- if $v.diagnostics.pprof.enabled }}
+  pprof:
+    endpoint: {{ $v.diagnostics.pprof.endpoint | quote }}
+{{- end }}
+{{- if $v.diagnostics.zpages.enabled }}
+  zpages:
+    endpoint: {{ $v.diagnostics.zpages.endpoint | quote }}
+{{- end }}
+{{- end }}
 
 service:
-  {{- if .Values.signals.selfMonitoring.enabled }}
+  {{- if $extensions }}
+  extensions: [{{ join ", " $extensions }}]
+  {{- end }}
+  {{- if $v.signals.selfMonitoring.enabled }}
   telemetry:
     metrics:
-      address: "0.0.0.0:{{ .Values.signals.selfMonitoring.metricsPort }}"
+      address: "0.0.0.0:{{ $v.signals.selfMonitoring.metricsPort }}"
     resource:
       k8s.pod.name: "${env:K8S_POD_NAME}"
       k8s.namespace.name: "${env:K8S_NAMESPACE}"
       k8s.node.name: "${env:K8S_NODE_NAME}"
   {{- end }}
   pipelines:
-{{- if .Values.signals.logs.enabled }}
+{{- if has "logs" $signals }}
     logs:
       receivers: [k8s_podlog]
-      processors: [memory_limiter{{ if .Values.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
+      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
       exporters: [otlp]
 {{- end }}
-{{- if .Values.signals.metrics.enabled }}
+{{- if has "metrics" $signals }}
     metrics:
       receivers: [prometheus]
-      processors: [memory_limiter{{ if .Values.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
+      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
       exporters: [otlp]
-{{- end }}
-{{- if .Values.signals.events.enabled }}
-    logs/events:
-      receivers: [k8s_events]
-      processors: [memory_limiter{{ if .Values.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
-      exporters: [otlp]
-{{- end }}
-{{- if .Values.signals.traces.enabled }}
-    traces:
-      receivers: [otlp]
-      processors: [memory_limiter{{ if .Values.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
-      exporters: [otlp]
-{{- end }}
-{{- if .Values.signals.selfMonitoring.enabled }}
+{{- if $v.signals.metrics.cluster }}
     metrics/k8s:
       receivers: [k8s_cluster]
-      processors: [memory_limiter, k8sattributes, batch]
+      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
       exporters: [otlp]
 {{- end }}
 {{- end }}
+{{- if has "events" $signals }}
+    logs/events:
+      receivers: [k8s_events]
+      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
+      exporters: [otlp]
+{{- end }}
+{{- if has "traces" $signals }}
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
+      exporters: [otlp]
+{{- end }}
+{{- end -}}

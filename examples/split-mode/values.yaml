@@ -1,0 +1,108 @@
+# Helm values for the split-mode example.
+#
+# Scenario: a large, high-volume tenant self-installs in its own namespace.
+# A single all-in-one collector would be a bottleneck — the log firehose from
+# thousands of pods competes for memory with the metric scrape and could OOM
+# the whole pipeline, taking metrics and events down with it.
+#
+# So the signals are split into three independently-sized Deployments via
+# `collectorGroups`. Each group is one collector pod running a minimal config
+# with only its own receivers/pipelines:
+#
+#   singletons — metrics + events. These receivers MUST stay at replicas: 1
+#                (two replicas would double-scrape every pod / double-emit
+#                every event). Cluster-inventory metrics (k8s_cluster) ride
+#                along here because they belong to the `metrics` signal.
+#
+#   logs       — the k8spodlogreceiver, isolated so a log burst can't starve
+#                the scrapers. Given more memory and a larger batch. This is
+#                the group you'll scale/shard first as the tenant grows.
+#
+#   traces     — the OTLP receiver. Stateless and behind a Service, so it is
+#                the one group that scales horizontally today (replicas: 2).
+#
+# Anything a group doesn't override is inherited from the global blocks below.
+# mode / namespaces / RBAC stay global — one grant per release covering the
+# union of all owned signals.
+#
+# Deploy (tenant only needs admin in its own namespace):
+#   kubectl apply -f ../namespace-mode/manifests/   # reuse the demo workloads
+#   helm install payments-obs ../../helm/observability-stack \
+#     --namespace payments \
+#     -f values.yaml
+
+mode: namespace
+tenantId: payments
+
+# --- Global defaults shared by every group (each group may override) ---
+
+signals:
+  logs:
+    enabled: true
+    sinceSeconds: 300
+    podLabelSelector: ""
+  metrics:
+    enabled: true
+    scrapeAnnotated: true
+    scrapeInterval: 30s
+    cluster: true
+  events:
+    enabled: true
+  traces:
+    enabled: true
+    grpcPort: 4317
+    httpPort: 4318
+  selfMonitoring:
+    enabled: true
+    metricsPort: 8888
+
+collector:
+  image:
+    repository: ghcr.io/eugenekurasov/security-observability-stack/collector
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  export:
+    endpoint: "otel-gateway:4317"
+    tls:
+      insecure: true
+
+# --- Topology: three groups instead of one all-in-one collector ---
+
+collectorGroups:
+  # Singleton scrapers — never scale past 1.
+  - name: singletons
+    signals: [metrics, events]
+
+  # Logs — isolated, more memory, larger batch. Scale/shard this first.
+  - name: logs
+    signals: [logs]
+    overrides:
+      collector:
+        replicas: 3
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+      signals:
+        logs:
+          # Coalesce more lines per push at high line rates.
+          maxBatchSize: 5000
+          flushInterval: 500ms
+
+  # Traces — stateless push, the one group that scales horizontally today.
+  - name: traces
+    signals: [traces]
+    overrides:
+      collector:
+        replicas: 2

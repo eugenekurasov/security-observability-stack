@@ -1,3 +1,9 @@
+{{- /* RBAC is global (one grant per release), covering the union of signals
+       owned across every collectorGroup. selfMonitoring (k8sattributes) and
+       metrics.cluster (k8sclusterreceiver) gate off the global signal values. */ -}}
+{{- $owned := include "observability-stack.ownedSignals" . | fromYamlArray -}}
+{{- $selfMon := .Values.signals.selfMonitoring.enabled -}}
+{{- $clusterMetrics := and (has "metrics" $owned) .Values.signals.metrics.cluster -}}
 {{- if eq .Values.mode "cluster" }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -6,7 +12,7 @@ metadata:
   labels:
     {{- include "observability-stack.labels" . | nindent 4 }}
 rules:
-  {{- if .Values.signals.logs.enabled }}
+  {{- if has "logs" $owned }}
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
@@ -14,7 +20,7 @@ rules:
     resources: ["pods/log"]
     verbs: ["get"]
   {{- end }}
-  {{- if .Values.signals.metrics.enabled }}
+  {{- if has "metrics" $owned }}
   - apiGroups: [""]
     resources: ["pods", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
@@ -24,12 +30,12 @@ rules:
   - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
     verbs: ["get"]
   {{- end }}
-  {{- if .Values.signals.events.enabled }}
+  {{- if has "events" $owned }}
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
   {{- end }}
-  {{- if .Values.signals.selfMonitoring.enabled }}
+  {{- if $clusterMetrics }}
   # k8sclusterreceiver — cluster mode gets node/namespace access too
   - apiGroups: [""]
     resources: ["nodes", "namespaces", "resourcequotas", "replicationcontrollers"]
@@ -46,6 +52,15 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]
+  {{- end }}
+  {{- if $selfMon }}
+  # k8sattributes processor — resolve pod → owning deployment for enrichment
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -80,7 +95,7 @@ metadata:
   labels:
     {{- include "observability-stack.labels" $root | nindent 4 }}
 rules:
-  {{- if $root.Values.signals.logs.enabled }}
+  {{- if has "logs" $owned }}
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
@@ -88,17 +103,17 @@ rules:
     resources: ["pods/log"]
     verbs: ["get"]
   {{- end }}
-  {{- if $root.Values.signals.metrics.enabled }}
+  {{- if has "metrics" $owned }}
   - apiGroups: [""]
     resources: ["pods", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
   {{- end }}
-  {{- if $root.Values.signals.events.enabled }}
+  {{- if has "events" $owned }}
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
   {{- end }}
-  {{- if $root.Values.signals.selfMonitoring.enabled }}
+  {{- if $clusterMetrics }}
   # k8sclusterreceiver — namespace mode excludes nodes/namespaces (cluster-scoped)
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
@@ -112,6 +127,15 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods"]
     verbs: ["get", "list"]
+  {{- end }}
+  {{- if $selfMon }}
+  # k8sattributes processor — resolve pod → owning deployment for enrichment
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
