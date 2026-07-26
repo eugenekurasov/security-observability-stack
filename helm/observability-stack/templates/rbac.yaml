@@ -1,8 +1,9 @@
 {{- /* RBAC is global (one grant per release), covering the union of signals
-       owned across every collectorGroup. selfMonitoring (k8sattributes) and
-       metrics.cluster (k8sclusterreceiver) gate off the global signal values. */ -}}
+       owned across every collectorGroup. metrics.cluster (k8sclusterreceiver)
+       grants are derived from the owned-signal union the same way
+       logs/metrics/events are. The traces pipeline (otlp receiver) needs no
+       Kubernetes RBAC of its own. */ -}}
 {{- $owned := include "observability-stack.ownedSignals" . | fromYamlArray -}}
-{{- $selfMon := .Values.signals.selfMonitoring.enabled -}}
 {{- $clusterMetrics := and (has "metrics" $owned) .Values.signals.metrics.cluster -}}
 {{- if eq .Values.mode "cluster" }}
 apiVersion: rbac.authorization.k8s.io/v1
@@ -52,15 +53,6 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]
-  {{- end }}
-  {{- if $selfMon }}
-  # k8sattributes processor — resolve pod → owning deployment for enrichment
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["replicasets"]
-    verbs: ["get", "list", "watch"]
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -127,15 +119,6 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods"]
     verbs: ["get", "list"]
-  {{- end }}
-  {{- if $selfMon }}
-  # k8sattributes processor — resolve pod → owning deployment for enrichment
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["replicasets"]
-    verbs: ["get", "list", "watch"]
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

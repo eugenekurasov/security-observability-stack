@@ -9,9 +9,9 @@ Called with a dict:
 
 Receivers/pipelines render only for the signals this group owns, so each
 group's pod runs a minimal config. selfMonitoring is not an ownership signal:
-it is a per-pod concern (this collector exposes its own telemetry + enriches
-via k8sattributes) and renders for every group whose effective values enable
-it. Extensions render per pod from the effective diagnostics block.
+it is a per-pod concern (this collector exposing its own telemetry) and renders
+for every group whose effective values enable it. Extensions render per pod from
+the effective diagnostics block.
 
 Consumed by configmap.yaml via:
   include "observability-stack.collectorConfig" (dict "root" $root "values" $v "signals" $g.signals)
@@ -148,24 +148,6 @@ processors:
     timeout: {{ $v.collector.processors.batch.timeout }}
     send_batch_size: {{ $v.collector.processors.batch.sendBatchSize }}
     send_batch_max_size: {{ $v.collector.processors.batch.sendBatchMaxSize }}
-{{- if $v.signals.selfMonitoring.enabled }}
-  k8sattributes:
-    auth_type: serviceAccount
-    extract:
-      metadata:
-        - k8s.pod.name
-        - k8s.pod.uid
-        - k8s.deployment.name
-        - k8s.namespace.name
-        - k8s.node.name
-      labels:
-        - tag_name: app.kubernetes.io/name
-          key: app.kubernetes.io/name
-          from: pod
-        - tag_name: app.kubernetes.io/version
-          key: app.kubernetes.io/version
-          from: pod
-{{- end }}
 
 exporters:
   otlp:
@@ -212,31 +194,31 @@ service:
 {{- if has "logs" $signals }}
     logs:
       receivers: [k8s_podlog]
-      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
+      processors: [memory_limiter, batch]
       exporters: [otlp]
 {{- end }}
 {{- if has "metrics" $signals }}
     metrics:
       receivers: [prometheus]
-      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
+      processors: [memory_limiter, batch]
       exporters: [otlp]
 {{- if $v.signals.metrics.cluster }}
     metrics/k8s:
       receivers: [k8s_cluster]
-      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
+      processors: [memory_limiter, batch]
       exporters: [otlp]
 {{- end }}
 {{- end }}
 {{- if has "events" $signals }}
     logs/events:
       receivers: [k8s_events]
-      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
+      processors: [memory_limiter, batch]
       exporters: [otlp]
 {{- end }}
 {{- if has "traces" $signals }}
     traces:
       receivers: [otlp]
-      processors: [memory_limiter{{ if $v.signals.selfMonitoring.enabled }}, k8sattributes{{ end }}, batch]
+      processors: [memory_limiter, batch]
       exporters: [otlp]
 {{- end }}
 {{- end -}}
