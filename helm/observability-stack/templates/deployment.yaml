@@ -58,7 +58,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          {{- if or (has "traces" $signals) $v.signals.selfMonitoring.enabled }}
+          {{- if or (has "traces" $signals) $v.signals.selfMonitoring.enabled $v.healthCheck.enabled }}
           ports:
             {{- if has "traces" $signals }}
             - name: otlp-grpc
@@ -73,11 +73,34 @@ spec:
               containerPort: {{ $v.signals.selfMonitoring.metricsPort }}
               protocol: TCP
             {{- end }}
+            {{- if $v.healthCheck.enabled }}
+            - name: health
+              containerPort: {{ $v.healthCheck.port }}
+              protocol: TCP
+            {{- end }}
           {{- end }}
           volumeMounts:
             - name: collector-config
               mountPath: /etc/otelcol
               readOnly: true
+          {{- if $v.healthCheck.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 5
+          {{- end }}
           resources:
             {{- toYaml $v.collector.resources | nindent 12 }}
       volumes:

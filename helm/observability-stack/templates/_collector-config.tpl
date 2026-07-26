@@ -176,10 +176,15 @@ exporters:
 {{/* Collect enabled diagnostics extensions so both the extensions block and
      the service.extensions list below stay in sync from one source. */}}
 {{- $extensions := list -}}
+{{- if $v.healthCheck.enabled }}{{- $extensions = append $extensions "health_check" }}{{- end -}}
 {{- if $v.diagnostics.pprof.enabled }}{{- $extensions = append $extensions "pprof" }}{{- end -}}
 {{- if $v.diagnostics.zpages.enabled }}{{- $extensions = append $extensions "zpages" }}{{- end -}}
 {{- if $extensions }}
 extensions:
+{{- if $v.healthCheck.enabled }}
+  health_check:
+    endpoint: "0.0.0.0:{{ $v.healthCheck.port }}"
+{{- end }}
 {{- if $v.diagnostics.pprof.enabled }}
   pprof:
     endpoint: {{ $v.diagnostics.pprof.endpoint | quote }}

@@ -32,3 +32,28 @@ jobs:
       - name: Test
         working-directory: otel-components/k8spodlogreceiver
         run: go test -v -mod=vendor ./...
+  build-test:
+    name: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      -
+        name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          # Keep it just for test if build has been past
+          push: false
+          tags: collector:latest
