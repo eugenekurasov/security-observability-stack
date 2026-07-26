@@ -109,6 +109,24 @@ signals:
     # receiver (the pod carries the prometheus.io/scrape annotation).
     metricsPort: 8888
 
+# Liveness/readiness endpoint for the collector process.
+#
+# Enabled by default: without it the Deployment has no probes at all, so
+# Kubernetes routes traffic to a pod whose pipelines have not started and
+# never restarts one whose HTTP server has wedged.
+#
+# Scope, honestly: this is *process-level* readiness — 200 once the service
+# has started, 503 while it is shutting down. It does NOT know whether the
+# log streams are healthy. Component health belongs to the metrics
+# (otelcol_active_log_streams, reconnect counters) and an alert on them,
+# not to this probe.
+healthCheck:
+  enabled: true
+  # Always bound to 0.0.0.0: the kubelet probes the pod IP, so a listener on
+  # 127.0.0.1 inside the container netns would be unreachable. Only the port
+  # is configurable, to make that mistake unrepresentable.
+  port: 13133
+
 # Debug/diagnostics extensions exposed by the collector process.
 #
 # Both are OFF by default. They expose collector/process internals —
