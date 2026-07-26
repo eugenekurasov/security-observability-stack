@@ -5,29 +5,29 @@
 
 # Security Observability Stack
 
-A Helm chart and custom OpenTelemetry Collector receiver for
-compliance-oriented, multi-tenant observability on Kubernetes —
-built for regulated environments (finance, healthcare) and serverless
-platforms (AWS Fargate, GKE Autopilot, AKS Virtual Nodes) where
-DaemonSets are restricted or unavailable, host access is limited by design,
-and tenant isolation is a first-class requirement.
+A Helm chart and a custom OpenTelemetry Collector receiver that collect
+Kubernetes pod logs through the API server instead of the node filesystem —
+no DaemonSet, no `hostPath`, no node-level privilege. Access is scoped by
+ordinary Kubernetes RBAC on the `pods/log` subresource, which makes per-tenant
+log collection an enforced boundary rather than a deployment convention, and
+makes the stack deployable on serverless node pools (AWS Fargate, AKS Virtual
+Nodes, GKE Autopilot) where DaemonSets are blocked or restricted.
 
 ## Why this exists
 
-Most observability stacks are built for a single-tenant, low-compliance
-default: broad RBAC, host-level log access via DaemonSets, and no
-built-in mapping to controls like SOC 2. Retrofitting compliance
-onto that default is expensive and error-prone. DaemonSet-based collectors
-also run into trouble on serverless node pools: Fargate blocks DaemonSets
-outright, AKS Virtual Nodes exclude them from ACI-backed nodes, and GKE
-Autopilot allows them only under tight resource limits with no write
-access to the host filesystem.
+Most observability stacks assume a single tenant and a node-level collector:
+broad RBAC plus host log access via a DaemonSet reading `/var/log/pods/`. That
+assumption breaks in two places. It grants a workload read access to the host
+root for what is functionally a narrow task, and it does not work at all on
+serverless node pools — Fargate blocks DaemonSets outright, AKS Virtual Nodes
+exclude them from ACI-backed nodes, and GKE Autopilot permits them only under
+tight resource limits with read-only access to `/var/log`.
 
-This project takes the opposite approach: start from RBAC-scoped,
-no-host-access collection and tenant isolation, then layer standard
-observability signals on top. Because collection goes through the
-Kubernetes API rather than the node filesystem, the same stack works
-on standard nodes, GPU nodes, and serverless nodes without modification.
+This project starts from the opposite end: RBAC-scoped, API-mediated collection
+with no host access, then standard observability signals layered on top.
+Because collection goes through the Kubernetes API rather than the node
+filesystem, the same deployment works on standard, GPU, and serverless nodes
+without modification.
 
 The core component, `k8spodlogreceiver`, provides a working implementation
 of the API-server-based log collection mode discussed in
@@ -54,7 +54,7 @@ viable path.
 | Benefit | Detail |
 |---|---|
 | **No collector on GPU nodes - ideal for AI clusters** | A DaemonSet schedules a collector pod on every node, including expensive GPU nodes (A100, H100). This wastes CPU and memory on nodes that should be 100% dedicated to training or inference. This stack runs as a single Deployment on a cheap CPU node and streams logs from GPU pods through the Kubernetes API — GPU nodes are never touched by the collector. |
-| **No hostPath mount** | DaemonSet collectors read log files from the host filesystem (`/var/log/pods/`), requiring broad read access to the node root. This is a common security finding in regulated environments. |
+| **No hostPath mount** | DaemonSet collectors read log files from the host filesystem (`/var/log/pods/`), requiring broad read access to the node root. This is a recurring finding in Kubernetes security review. |
 | **Lower total resource footprint** | One collector Deployment instead of N DaemonSet pods (one per node). On EKS and GKE the managed API server handles streaming connections without dedicated cluster resources — there is no meaningful overhead for this use case. On self-hosted clusters, log data traverses the API server rather than being read locally, which is worth accounting for when sizing the control plane. |
 | **Works on serverless node pools (Fargate, GKE Autopilot, AKS Virtual Nodes)** | AWS Fargate and AKS Virtual Nodes don't schedule DaemonSet pods at all, and GKE Autopilot restricts `hostPath` to read-only `/var/log` — so node-based collectors are either impossible or constrained on these platforms. Because this stack is a plain Deployment that reads through the Kubernetes API, it collects from pods on serverless nodes with no special configuration. Mixed-mode clusters (some standard nodes, some serverless) are the typical case: run the collector on one standard CPU node and it streams logs from pods on Fargate or virtual nodes automatically. |
 
@@ -167,9 +167,10 @@ helm install my-obs helm/observability-stack \
    tenant's namespace(s). The RBAC grants only the permissions required by
    the signals that are enabled.
 
-3. **Compliance mapping is explicit, not implied.** See
-   [`docs/compliance-mapping.md`](docs/compliance-mapping.md) for a control-by-control
-   mapping to SOC 2 requirements.
+3. **Control mapping is explicit, not implied.** See
+   [`docs/compliance-mapping.md`](docs/compliance-mapping.md) for how the
+   stack's controls map to SOC 2 Trust Services Criteria, including where the
+   mapping stops.
 
 4. **Infrastructure and application code are versioned together.**
    Helm and the custom collector build manifest live in one repo so the

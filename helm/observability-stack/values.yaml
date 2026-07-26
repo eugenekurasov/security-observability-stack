@@ -236,8 +236,7 @@ collector:
 
   # Processors applied to every pipeline. Order in the pipeline is fixed by the
   # template: memory_limiter first (so it can shed load before anything else
-  # buffers), then k8sattributes (when self-monitoring is enabled), then batch
-  # last (so it batches enriched data right before export).
+  # buffers), then batch last (so it batches right before export).
   processors:
     # Drops data / applies backpressure when the collector approaches its memory
     # limit, protecting it from OOMKill. Percentages are of the container memory

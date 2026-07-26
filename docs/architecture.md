@@ -2,9 +2,11 @@
 
 ## Goal
 
-Compliance-oriented, multi-tenant observability for Kubernetes platforms in
-regulated sectors (finance, healthcare, AI/ML). Deployable via Helm with tenant
-isolation and audit-friendly defaults built in — not bolted on after the fact.
+Observability for Kubernetes platforms, collected through the API server rather
+than the node filesystem. Deployable via Helm in two modes: cluster-wide, or
+scoped to a set of namespaces with tenant isolation expressed as RBAC. Neither
+mode requires node-level privilege, so the same deployment runs unchanged on
+standard, GPU, and serverless nodes.
 
 ---
 
@@ -41,7 +43,8 @@ flowchart LR
                     r5[otlp]
                 end
                 subgraph processors["Processors"]
-                    p1[k8sattributes]
+                    p0[memory_limiter]
+                    p2[batch]
                 end
                 subgraph exporters["Exporters"]
                     e1[otlp]
@@ -57,8 +60,9 @@ flowchart LR
     svcontainer -->|pods/log API| apiserver
     apiserver --> r1 & r2 & r3 & r4
     apps -->|gRPC / HTTP| r5
-    r1 & r2 & r3 & r4 & r5 --> p1
-    p1 --> e1
+    r1 & r2 & r3 & r4 & r5 --> p0
+    p0 --> p2
+    p2 --> e1
     e1 -->|OTLP| backend
 ```
 
@@ -72,10 +76,18 @@ flowchart LR
 | **Cluster metrics** | `k8s_cluster` (contrib) | Pod/deployment/job resource usage and status via the k8s API — issues a paginated LIST of all watched resource types on start, then switches to a persistent watch with an in-memory cache (30s emit interval makes zero API calls at steady state). Spike is transient but repeats on collector restart or watch reconnect after the API server's watch cache window expires. |
 | **Traces** | `otlp` (core) | Spans over gRPC (4317) / HTTP (4318) from instrumented applications |
 
-All signals pass through the **`k8sattributes` processor**, which enriches every
-record with `k8s.pod.name`, `k8s.namespace.name`, `k8s.deployment.name`,
-`k8s.node.name`, and selected pod labels — queried from the API, not from
-environment variables.
+For the API-collected signals (logs, events, cluster metrics), the receivers set
+Kubernetes identity themselves: `k8spodlog` stamps `k8s.namespace.name`,
+`k8s.pod.name`, `k8s.pod.uid`, and `k8s.container.name` on the Resource from the
+pod object it reads, and `k8s_cluster` likewise attaches its k8s attributes to
+the Resource. `k8s_events` splits them: object identity (`k8s.object.*`,
+`k8s.node.name`) goes on the Resource, but the namespace and event details
+(`k8s.namespace.name`, `k8s.event.*`) are set as log-record attributes, not
+Resource attributes. No enrichment processor runs on any pipeline — every signal
+keeps whatever attributes its receiver (or, for traces, the emitting
+application's OTel SDK) set. Traces therefore carry only the Kubernetes context the
+application's own resource detector provides; collector-side span enrichment is
+deferred (it would be a `k8sattributes` processor on the traces pipeline).
 
 The collector also exposes its own Go runtime metrics (heap, pipeline throughput,
 drop counts) at port 8888 via `service.telemetry`. When `signals.metrics` is
@@ -219,9 +231,10 @@ kept strictly separate from per-tenant data.
    competing for resources on a node that costs orders of magnitude more than
    a standard worker.
 
-4. **Compliance mapping is explicit, not implied.** See [`compliance-mapping.md`](compliance-mapping.md)
-   for a control-by-control mapping to SOC 2 requirements
-   (audit log retention, access segregation, encryption in transit, etc.).
+4. **Control mapping is explicit, not implied.** See
+   [`compliance-mapping.md`](compliance-mapping.md) for how the stack's
+   controls map to SOC 2 Trust Services Criteria, including where the mapping
+   stops.
 
 5. **Reproducible builds.** The OCB manifest (`otel-components/builder-config.yaml`)
    and `go.mod` are checked in together with pinned versions. The exact
@@ -254,6 +267,3 @@ kept strictly separate from per-tenant data.
   scrape of every node passes through the control plane. Switch to direct kubelet
   scraping on port 10250 (same pattern as `kube-prometheus-stack`) to remove the
   API server from the node metrics path.
-
-- **Compliance mapping** — SOC 2 control-by-control mapping in
-  `docs/compliance-mapping.md`.
