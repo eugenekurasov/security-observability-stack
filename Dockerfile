@@ -1,16 +1,17 @@
-# Multi-stage build for the custom OTel Collector binary.
+# Multi-stage build for secobs-collector, a custom distribution of the
+# OpenTelemetry Collector.
 #
 # Stage 1 (builder): installs OCB, copies the local receiver module,
 #                    and produces a statically linked binary.
 # Stage 2 (runtime): copies the binary into a minimal distroless image.
 #
 # Build:
-#   docker build -t otelcol-security:0.1.0 .
+#   docker build -t secobs-collector:0.1.0 .
 #
 # Run locally (requires a collector config at /etc/otelcol/collector.yaml):
 #   docker run --rm \
 #     -v $(pwd)/helm/observability-stack/templates:/etc/otelcol \
-#     otelcol-security:0.1.0
+#     secobs-collector:0.1.0
 
 FROM golang:1.26-alpine AS builder
 
@@ -42,7 +43,7 @@ RUN CGO_ENABLED=0 builder \
 # distroless/static has no shell, no libc — fits a CGO_ENABLED=0 binary.
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY --from=builder /build/dist/otelcol-security /otelcol-security
+COPY --from=builder /build/dist/secobs-collector /secobs-collector
 
-ENTRYPOINT ["/otelcol-security"]
+ENTRYPOINT ["/secobs-collector"]
 CMD ["--config=/etc/otelcol/collector.yaml"]
