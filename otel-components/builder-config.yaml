@@ -1,6 +1,6 @@
 # OpenTelemetry Collector Builder (OCB) manifest.
 #
-# Produces a single collector binary (otelcol-security) that includes:
+# Produces a single collector binary (secobs-collector) that includes:
 #   - k8spodlogreceiver  — local custom component (this repo)
 #   - k8seventsreceiver  — Kubernetes Event objects (contrib)
 #   - prometheusreceiver — pod metrics scraping (contrib)
@@ -22,11 +22,11 @@
 #   builder --config=otel-components/builder-config.yaml
 #
 # Or via Docker (recommended — see Dockerfile at repo root):
-#   docker build -t otelcol-security:0.1.0 .
+#   docker build -t secobs-collector:0.1.0 .
 
 dist:
-  name: otelcol-security
-  description: OTel Collector distribution for Kubernetes pod log collection through the API server
+  name: secobs-collector
+  description: A distribution of the OpenTelemetry Collector for Kubernetes pod log collection through the API server
   output_path: ./otel-components/dist
   otelcol_version: "0.156.0"
 

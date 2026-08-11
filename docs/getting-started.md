@@ -29,25 +29,26 @@ cd security-observability-stack
 
 ## Step 1 — Build the collector image
 
-The Helm chart requires a custom OpenTelemetry Collector binary that includes
-`k8spodlogreceiver`. The upstream `otel/opentelemetry-collector-contrib` image
-does not include it and will fail to start.
+The Helm chart requires `secobs-collector`, a custom distribution of the
+OpenTelemetry Collector that includes `k8spodlogreceiver`. The upstream
+`otel/opentelemetry-collector-contrib` image does not include it and will
+fail to start.
 
 ```bash
 # Build the image (runs OCB inside Docker — no local Go toolchain needed)
-docker build -t otelcol-security:0.1.0 .
+docker build -t secobs-collector:0.1.0 .
 
 # Push to your registry
-docker tag otelcol-security:0.1.0 ghcr.io/eugenekurasov/security-observability-stack/collector:0.1.0
+docker tag secobs-collector:0.1.0 ghcr.io/eugenekurasov/security-observability-stack/collector:0.1.0
 docker push ghcr.io/eugenekurasov/security-observability-stack/collector:0.1.0
 ```
 
 > **Local testing shortcut** — if you are using kind or k3d you can load the
 > image directly instead of pushing:
 > ```bash
-> kind load docker-image otelcol-security:0.1.0
+> kind load docker-image secobs-collector:0.1.0
 > # or
-> k3d image import otelcol-security:0.1.0 -c <cluster-name>
+> k3d image import secobs-collector:0.1.0 -c <cluster-name>
 > ```
 
 ---
@@ -60,7 +61,7 @@ docker push ghcr.io/eugenekurasov/security-observability-stack/collector:0.1.0
 helm install payments-obs helm/observability-stack \
   --namespace payments \
   -f examples/namespace-mode/values.yaml \
-  --set collector.image.repository=otelcol-security \
+  --set collector.image.repository=secobs-collector \
   --set collector.image.tag=0.1.0 \
   --set collector.export.endpoint="<your-otlp-gateway>:4317"
 ```
@@ -73,7 +74,7 @@ kubectl create namespace observability
 helm install platform-obs helm/observability-stack \
   --namespace observability \
   -f examples/cluster-mode/values.yaml \
-  --set collector.image.repository=otelcol-security \
+  --set collector.image.repository=secobs-collector \
   --set collector.image.tag=0.1.0 \
   --set collector.export.endpoint="<your-otlp-gateway>:4317"
 ```

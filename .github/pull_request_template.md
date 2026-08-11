@@ -11,8 +11,8 @@
 ## Area(s) affected
 
 - [ ] CI/CD
-- [ ] Helm
+- [ ] Helm chart
 - [ ] k8spodlogreceiver
-- [ ] otel-collector
+- [ ] secobs-collector (OCB manifest / image)
 - [ ] Docs
 - [ ] Other:

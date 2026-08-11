@@ -184,9 +184,10 @@ helm install my-obs helm/observability-stack \
 
 ## Collector image
 
-The Helm chart references a custom
+The Helm chart references `secobs-collector`, a custom distribution of the
+OpenTelemetry Collector built with
 [OpenTelemetry Collector Builder (OCB)](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder)
-image that includes `k8spodlogreceiver`. Update `collector.image` in
+that includes `k8spodlogreceiver`. Update `collector.image` in
 `values.yaml` once the OCB manifest and image build are in place.
 
 `k8seventsreceiver`, the Prometheus receiver, and the OTLP receiver all ship
