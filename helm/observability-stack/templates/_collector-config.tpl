@@ -149,6 +149,12 @@ processors:
     send_batch_size: {{ $v.collector.processors.batch.sendBatchSize }}
     send_batch_max_size: {{ $v.collector.processors.batch.sendBatchMaxSize }}
 
+{{/* One OTLP exporter for every pipeline. Printing records for inspection is
+     deliberately not a chart feature: a debug exporter here would write to the
+     same stdout the k8s_podlog receiver tails, so every record would be read
+     back in and printed again. The examples run a separate gateway pod that
+     does the printing instead — see the otel-gateway manifest in each
+     directory under examples/. */}}
 exporters:
   otlp:
     endpoint: {{ $v.collector.export.endpoint | quote }}
@@ -184,7 +190,15 @@ service:
   {{- if $v.signals.selfMonitoring.enabled }}
   telemetry:
     metrics:
-      address: "0.0.0.0:{{ $v.signals.selfMonitoring.metricsPort }}"
+      # `address` was removed in collector v0.156 in favour of the OpenTelemetry
+      # SDK config schema; a pull reader with a Prometheus exporter is the
+      # equivalent of the old host:port form.
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: "0.0.0.0"
+                port: {{ $v.signals.selfMonitoring.metricsPort }}
     resource:
       k8s.pod.name: "${env:K8S_POD_NAME}"
       k8s.namespace.name: "${env:K8S_NAMESPACE}"
