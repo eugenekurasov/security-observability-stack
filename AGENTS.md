@@ -39,16 +39,18 @@ directly — not user-facing, so they don't belong in the READMEs above.
   informer**: `startPodObserver` runs a copied-from-contrib List+Watch loop
   (`internal/watch`, a faithful copy of `k8sinventory/watch`) rather than a
   `SharedInformerFactory`. It has no local cache and no periodic resync: it
-  emits the initial pod list once (`IncludeInitialState`), then streams
-  Added/Modified/Deleted. On a 410 Gone it resumes from a fresh
-  resourceVersion **without** re-listing (same as contrib's
-  `k8sobjectsreceiver`, which is built on this same Observer), so a pod
-  created during a 410 gap is not re-emitted as Added. This matters more here
-  than in k8sobjectsreceiver: there a missed Added is one lost record, but
-  here it would mean a pod's log stream never starts (unbounded loss). It is
-  mitigated in `handlePodEvent`: Modified events also call `ensureStreams`
-  (idempotent), so a pod created during the gap is picked up on its next
-  update rather than only on process restart. `ensureStreams` deliberately
+  always emits the initial pod list as synthetic Added events, then streams
+  Added/Modified/Deleted. On a 410 Gone (watch resourceVersion compacted
+  away by etcd) contrib's copy resumes from a fresh resourceVersion
+  **without** re-listing, so a pod created during the gap is never emitted
+  as Added — tolerable for `k8sobjectsreceiver` (one lost record), fatal
+  here (a pod whose log stream never starts, unbounded loss). Our copy
+  diverges: every watch restart re-runs `sendInitialState`, re-emitting the
+  full current state as synthetic Added events — safe because `ensureStreams`/`markContainerStates` are
+  idempotent, and guarded by `TestObserverReplaysInitialStateAfter410`.
+  Defense in depth remains in `handlePodEvent`: Modified events also call
+  `ensureStreams`, so a pod missed by any path is picked up on its next
+  update. `ensureStreams` deliberately
   does NOT bump the `added` discovery counter so per-Modified calls don't
   inflate it. `handlePodEvent` converts the Observer's
   `*unstructured.Unstructured` back to a typed `*corev1.Pod`. The gap-free
