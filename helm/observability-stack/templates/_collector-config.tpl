@@ -24,12 +24,15 @@ Consumed by configmap.yaml via:
 {{- if eq $v.mode "cluster" }}{{- $targetNs = list }}{{- end -}}
 receivers:
 {{- if has "logs" $signals }}
-  k8s_podlog:
+  k8s_pod_log:
     namespaces: {{ $targetNs | toJson }}
     pod_label_selector: {{ $v.signals.logs.podLabelSelector | quote }}
     since_seconds: {{ $v.signals.logs.sinceSeconds }}
+    pod_resync_period: {{ $v.signals.logs.podResyncPeriod }}
     api_config:
       auth_type: serviceAccount
+      kube_api_qps: {{ $v.signals.logs.kubeAPIQPS }}
+      kube_api_burst: {{ $v.signals.logs.kubeAPIBurst }}
     reconnect_backoff:
       initial_interval: {{ $v.signals.logs.reconnectBackoff.initialInterval }}
       max_interval: {{ $v.signals.logs.reconnectBackoff.maxInterval }}
@@ -151,7 +154,7 @@ processors:
 
 {{/* One OTLP exporter for every pipeline. Printing records for inspection is
      deliberately not a chart feature: a debug exporter here would write to the
-     same stdout the k8s_podlog receiver tails, so every record would be read
+     same stdout the k8s_pod_log receiver tails, so every record would be read
      back in and printed again. The examples run a separate gateway pod that
      does the printing instead — see the otel-gateway manifest in each
      directory under examples/. */}}
@@ -207,7 +210,7 @@ service:
   pipelines:
 {{- if has "logs" $signals }}
     logs:
-      receivers: [k8s_podlog]
+      receivers: [k8s_pod_log]
       processors: [memory_limiter, batch]
       exporters: [otlp]
 {{- end }}

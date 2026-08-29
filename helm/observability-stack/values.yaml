@@ -65,6 +65,22 @@ signals:
       maxInterval: 30s
       # Total time to keep retrying a failing stream before giving up; 0 = retry forever.
       maxElapsedTime: 5m
+    # How often the pod informer re-delivers every pod it has cached, which
+    # re-runs the receiver's (idempotent) stream bookkeeping. Doubles as a
+    # self-healing sweep: a stream that gave up after
+    # reconnectBackoff.maxElapsedTime is restarted on the next resync rather
+    # than waiting for that pod to change. Served from the local cache — no
+    # API server traffic. 0 = no resync (streams start only on pod events).
+    podResyncPeriod: 10m
+    # Client-side rate limits for the receiver's own calls to the API server
+    # (opening log streams, pod list/watch). client-go's built-in defaults are
+    # 5 qps / burst 10, low enough that a burst of pod starts queues behind
+    # them — visible as "Waited before sending request ... client-side
+    # throttling" in the collector log. Size burst to how many streams may
+    # open at once (roughly: containers that can appear together, e.g. on a
+    # collector restart), and qps to the steady reconnect rate.
+    kubeAPIQPS: 20
+    kubeAPIBurst: 50
 
   metrics:
     enabled: true
