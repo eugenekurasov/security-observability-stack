@@ -23,55 +23,45 @@ These are implementation details for anyone editing the Go source
 directly — not user-facing, so they don't belong in the READMEs above.
 
 - **`receiver.go` idle-connection cleanup**: `Start` builds one shared
-  `httpClient` via `rest.HTTPClientFor`, then passes it to both
-  `kubernetes.NewForConfigAndClient` (typed clientset, for log streaming)
-  and `dynamic.NewForConfigAndClient` (dynamic client, for the pod-discovery
-  `watch.Observer`) instead of the simpler `NewForConfig` — so both clients
-  share one transport pool and `Shutdown` can drain it with a single
-  `httpClient.CloseIdleConnections()`. Cancelling the observer/stream
-  context only aborts in-flight requests — it doesn't close idle
-  keep-alive connections already in the transport pool, which otherwise
-  leak as goroutines (caught by `goleak` in tests). Preserve this pattern
-  if you rewrite `Start`/`Shutdown`, and apply the same fix in any test
-  that builds its own client against a real cluster.
+  `httpClient` via `rest.HTTPClientFor` and passes it to
+  `kubernetes.NewForConfigAndClient` rather than using the simpler
+  `NewForConfig` — so log streaming and the pod informers share one transport
+  pool that `Shutdown` can drain in a single call. Cancelling the informer or
+  stream context only aborts in-flight requests; it does not close idle
+  keep-alive connections already in the transport pool, which otherwise leak
+  as goroutines (caught by `goleak` in tests). Preserve this pattern if you
+  rewrite `Start`/`Shutdown`, and apply the same fix in any test that builds
+  its own client against a real cluster.
 
-- **Pod discovery uses `internal/watch` (Observer), not a client-go
-  informer**: `startPodObserver` runs a copied-from-contrib List+Watch loop
-  (`internal/watch`, a faithful copy of `k8sinventory/watch`) rather than a
-  `SharedInformerFactory`. It has no local cache and no periodic resync: it
-  always emits the initial pod list as synthetic Added events, then streams
-  Added/Modified/Deleted. On a 410 Gone (watch resourceVersion compacted
-  away by etcd) contrib's copy resumes from a fresh resourceVersion
-  **without** re-listing, so a pod created during the gap is never emitted
-  as Added — tolerable for `k8sobjectsreceiver` (one lost record), fatal
-  here (a pod whose log stream never starts, unbounded loss). Our copy
-  diverges: every watch restart re-runs `sendInitialState`, re-emitting the
-  full current state as synthetic Added events — safe because `ensureStreams`/`markContainerStates` are
-  idempotent, and guarded by `TestObserverReplaysInitialStateAfter410`.
-  Defense in depth remains in `handlePodEvent`: Modified events also call
-  `ensureStreams`, so a pod missed by any path is picked up on its next
-  update. `ensureStreams` deliberately
-  does NOT bump the `added` discovery counter so per-Modified calls don't
-  inflate it. `handlePodEvent` converts the Observer's
-  `*unstructured.Unstructured` back to a typed `*corev1.Pod`. The gap-free
-  alternative is k8sinventory's PullMode observer (periodic full re-List,
-  which is its `DefaultMode`) — not used here to keep watch's instant
-  reaction and low API load.
+- **Pod discovery lives in `internal/poddiscovery`**, a client-go
+  `SharedIndexInformer` per configured namespace. The package knows nothing
+  about log streams: it reports pods through a `Handler` of three callbacks,
+  and `receiver.go`'s `startPodDiscovery` is the only place the two meet.
+  Three details there are deliberate and easy to undo by accident:
+  - **The ListWatch is built from the typed clientset, not
+    `cache.NewFilteredListWatchFromClient`.** The latter needs a `RESTClient`
+    that `fake.NewSimpleClientset` does not provide, so discovery would stop
+    being testable without a real API server; the typed client also hands
+    handlers `*corev1.Pod` directly, with no unstructured decoding.
+  - **`podListWatch` opts out of WatchList (streaming list) semantics**, which
+    client-go's `WatchListClient` gate enables by default. On an API server
+    without streaming-list support the reflector waits ~10s for a bookmark
+    that never arrives before falling back to a plain List, and repeats that
+    on every re-list — the fallback is not sticky. The receiver's stated
+    compatibility promise is plain List/Watch (stable since k8s 1.0), so the
+    opt-out keeps startup identical on every supported version. Revisit when
+    the minimum supported version has streaming lists.
+  - **Handler callbacks must stay idempotent.** `ensureStreams` and
+    `markContainerStates` run from `OnAdd` *and* `OnUpdate`, and `OnUpdate`
+    also fires for every cached pod on each resync (`pod_resync_period`) —
+    that repetition is what restarts a stream which gave up after
+    `ReconnectBackoff.MaxElapsedTime`. `Start` rejects a Handler with any
+    callback unset rather than panicking on the first event.
 
-- **`internal/watch` dropped the upstream checkpointer**: contrib's
-  `k8sinventory/watch` persists the watch resourceVersion to a storage
-  extension so discovery resumes across restarts; that whole mechanism
-  (`checkpointer.go`, the `storage.Client` arg to `watch.New`, the
-  persisted-RV skip in `sendInitialState`, the checkpointer branch of
-  `getResourceVersion`) was removed here. Reason: it only makes sense for a
-  synchronous emitter like `k8sobjectsreceiver` (a committed RV means "every
-  record up to here was delivered"). This receiver starts a long-lived log
-  stream as a *side effect* of discovering a pod, so a committed discovery RV
-  can advance past a pod whose stream isn't yet durable — and on restart
-  `sendInitialState` would skip it (an at-most-once "lose a pod" hazard) with
-  no benefit to log continuity. Real log-restart continuity would need
-  per-container log-offset checkpointing (last delivered `SinceTime`), a
-  separate mechanism. So `internal/watch` is intentionally NOT a byte-faithful
-  copy of contrib's watch; the divergence is documented in the header of
-  `observer.go`. When adopting contrib's package directly, its `watch.New`
-  reintroduces the `storage.Client` arg — pass nil.
+  This replaced a copy of contrib's `k8sinventory/watch` Observer, which had
+  no cache and, on a 410 Gone, resumed from a fresh resourceVersion without
+  reconciling: a pod created during the gap never produced an Added event, so
+  its log stream never started. The informer re-lists and diffs against its
+  cache, so both creations and deletions missed during a gap surface —
+  deletions as `DeletedFinalStateUnknown` tombstones, which the package's
+  `podFrom` unwraps so `OnDelete` still receives the pod.

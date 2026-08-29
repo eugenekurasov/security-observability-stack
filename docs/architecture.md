@@ -36,8 +36,8 @@ flowchart LR
         subgraph cpu["CPU nodes"]
             subgraph collector["OTel Collector  (observability ns)"]
                 subgraph recv["Receivers"]
-                    r1[k8spodlog]
-                    r2[k8sevents]
+                    r1[k8s_pod_log]
+                    r2[k8s_events]
                     r3[prometheus]
                     r4[k8s_cluster]
                     r5[otlp]
@@ -70,14 +70,14 @@ flowchart LR
 
 | Signal | Receiver | What it captures |
 |---|---|---|
-| **Container logs** | `k8spodlog` (custom) | stdout/stderr of every matching container, streamed via `CoreV1().Pods().GetLogs()` — same API path as `kubectl logs -f` |
+| **Container logs** | `k8s_pod_log` (custom) | stdout/stderr of every matching container, streamed via `CoreV1().Pods().GetLogs()` — same API path as `kubectl logs -f` |
 | **Kubernetes events** | `k8sevents` (contrib) | Pod restarts, OOMKills, scheduling failures, quota violations, image pull errors |
 | **App metrics** | `prometheus` (contrib) | Pods annotated with `prometheus.io/scrape: "true"` |
 | **Cluster metrics** | `k8s_cluster` (contrib) | Pod/deployment/job resource usage and status via the k8s API — issues a paginated LIST of all watched resource types on start, then switches to a persistent watch with an in-memory cache (30s emit interval makes zero API calls at steady state). Spike is transient but repeats on collector restart or watch reconnect after the API server's watch cache window expires. |
 | **Traces** | `otlp` (core) | Spans over gRPC (4317) / HTTP (4318) from instrumented applications |
 
 For the API-collected signals (logs, events, cluster metrics), the receivers set
-Kubernetes identity themselves: `k8spodlog` stamps `k8s.namespace.name`,
+Kubernetes identity themselves: `k8s_pod_log` stamps `k8s.namespace.name`,
 `k8s.pod.name`, `k8s.pod.uid`, and `k8s.container.name` on the Resource from the
 pod object it reads, and `k8s_cluster` likewise attaches its k8s attributes to
 the Resource. `k8s_events` splits them: object identity (`k8s.object.*`,
