@@ -1,3 +1,13 @@
+# Home of the collector and the debug gateway. `helm install
+# --create-namespace` would create this too, but 04-otel-gateway.yaml is
+# applied before the chart, so it has to exist by then.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    compliance.io/tenant: platform
+---
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -15,9 +25,9 @@ metadata:
 # GPU namespace for AI inference workloads.
 # The collector never schedules a pod here — it streams logs from these
 # pods through the Kubernetes API from a CPU node.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: inference
-  labels:
-    compliance.io/team: ml-platform
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: inference
+#   labels:
+#     compliance.io/team: ml-platform

@@ -1,4 +1,9 @@
 .claude
 .vscode
 **/.DS_Store
-otel-components/k8spodlogreceiver/vendor
+/dist
+
+# Local credential files (Grafana Cloud OTLP tokens etc.) — never commit.
+.env
+.env.*
+.env_*

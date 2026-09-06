@@ -1,38 +1,36 @@
 # Contributing
 
-Contributions can target either the `k8spodlogreceiver` OTel component or
-the `observability-stack` Helm chart.
+This repository holds the `observability-stack` Helm chart and the OCB
+manifest for the `secobs-collector` image.
 
-## k8spodlogreceiver
+The `k8spodlogreceiver` OTel component lives in its own repository —
+[eugenekurasov/k8spodlogreceiver](https://github.com/eugenekurasov/k8spodlogreceiver).
+Send changes to the receiver (code, tests, config reference) there; this
+repo only consumes it as a pinned module in
+[`builder-config.yaml`](builder-config.yaml).
+
+## Collector image
 
 ### Build
 
 ```bash
-cd otel-components/k8spodlogreceiver
-go build ./...
+docker build -t secobs-collector:0.1.0 .
 ```
 
-### Unit tests
+The Dockerfile runs OCB against `builder-config.yaml` and
+pulls every component — including `k8spodlogreceiver` — from the module
+proxy. Nothing is built from local sources.
+
+### Build without Docker
 
 ```bash
-cd otel-components/k8spodlogreceiver
-go test -v ./...
+go install go.opentelemetry.io/collector/cmd/builder@v0.159.0
+builder --config=builder-config.yaml
 ```
 
-### Integration tests (kind cluster)
-
-Requires Docker running and [`kind`](https://kind.sigs.k8s.io/):
-
-```bash
-brew install kind
-kind create cluster --name k8spodlog-test --image kindest/node:v1.34.8
-cd otel-components/k8spodlogreceiver
-go test -v -tags integration -timeout 180s ./...
-kind delete cluster --name k8spodlog-test
-```
-
-See [`otel-components/k8spodlogreceiver/README.md`](otel-components/k8spodlogreceiver/README.md#running-tests-locally)
-for details (macOS `DOCKER_HOST` note, vendoring, cleanup gotchas).
+Keep the OCB version, `otelcol_version`, and every `gomod` line in the
+manifest on the same collector release; mismatches are the most common
+build failure.
 
 ## Helm chart
 
@@ -58,6 +56,6 @@ kind delete cluster --name obs-stack-test
 The collector image referenced in `values.yaml` must include
 `k8spodlogreceiver` (it's not in the upstream
 `otel/opentelemetry-collector-contrib` image) — see
-[`otel-components/builder-config.yaml`](otel-components/builder-config.yaml).
+[`builder-config.yaml`](builder-config.yaml).
 `examples/cluster-mode` and `examples/namespace-mode` have sample
 `values.yaml` overrides for each deployment mode.

@@ -1,0 +1,54 @@
+# OpenTelemetry Collector Builder (OCB) manifest.
+#
+# Produces a single collector binary (secobs-collector) that includes:
+#   - k8spodlogreceiver  — pod logs via the API server
+#                          (github.com/eugenekurasov/k8spodlogreceiver,
+#                          developed in its own repository)
+#   - k8seventsreceiver  — Kubernetes Event objects (contrib)
+#   - k8sclusterreceiver — cluster-level object metrics (contrib)
+#   - prometheusreceiver — pod metrics scraping (contrib)
+#   - otlpreceiver       — trace/metric/log ingestion from apps (core)
+#   - otlpexporter       — forward all signals to a gateway (core)
+#   - batchprocessor     — buffer before export (core)
+#   - memorylimiterprocessor — protect collector from OOM (core)
+#
+# IMPORTANT: every component version below must stay on the same collector
+# release, and k8spodlogreceiver must be a tag built against that release.
+# Mismatches are the most common build failure when bumping the collector.
+#
+# As of v0.159.0 the stable modules (component, consumer, pdata, receiver)
+# are versioned at v1.62.0 independently of the core v0.x release train.
+# Receiver/processor/exporter *implementation* modules remain on v0.x.
+#
+# Build:
+#   go install go.opentelemetry.io/collector/cmd/builder@v0.159.0
+#   builder --config=builder-config.yaml
+#
+# Or via Docker (recommended — see Dockerfile at repo root):
+#   docker build -t secobs-collector:0.1.0 .
+
+dist:
+  name: secobs-collector
+  description: A distribution of the OpenTelemetry Collector for Kubernetes pod log collection through the API server
+  output_path: ./dist
+  otelcol_version: "0.159.0"
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8seventsreceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver v0.159.0
+  - gomod: github.com/eugenekurasov/k8spodlogreceiver v0.1.1
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.159.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.159.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.159.0
+
+extensions:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/pprofextension v0.159.0
+  - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.159.0
+

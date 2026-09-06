@@ -1,8 +1,10 @@
 # Multi-stage build for secobs-collector, a custom distribution of the
 # OpenTelemetry Collector.
 #
-# Stage 1 (builder): installs OCB, copies the local receiver module,
-#                    and produces a statically linked binary.
+# Stage 1 (builder): installs OCB and produces a statically linked binary
+#                    from builder-config.yaml. Every component, including
+#                    k8spodlogreceiver, is resolved from the Go module
+#                    proxy — nothing is built from local sources.
 # Stage 2 (runtime): copies the binary into a minimal distroless image.
 #
 # Build:
@@ -18,26 +20,18 @@ FROM golang:1.26-alpine AS builder
 RUN apk add --no-cache git ca-certificates
 
 # Install OCB at the same version as the collector components.
-# Bump this together with otelcol_version in otel-components/builder-config.yaml.
-RUN go install go.opentelemetry.io/collector/cmd/builder@v0.156.0
+# Bump this together with otelcol_version in builder-config.yaml.
+RUN go install go.opentelemetry.io/collector/cmd/builder@v0.159.0
 
 WORKDIR /build
 
-# Copy the OCB manifest and the local receiver.
-# builder-config.yaml references k8spodlogreceiver via path: ./k8spodlogreceiver,
-# so both must land at the same level here.
-COPY otel-components/builder-config.yaml ./
-COPY otel-components/k8spodlogreceiver   ./k8spodlogreceiver/
+COPY builder-config.yaml ./
 
-# Resolve and verify the local module's dependencies before OCB runs.
-RUN cd k8spodlogreceiver && go mod tidy
-
-# Override output_path so the binary lands predictably regardless of what
-# the manifest says (the manifest uses ./otel-components/dist which is
-# relative to the repo root, not this build directory).
-RUN CGO_ENABLED=0 builder \
-      --config=builder-config.yaml \
-      --output-path=./dist
+# The manifest's output_path (./dist) is relative to the working directory,
+# so the binary lands at /build/dist — same place the runtime stage copies
+# from, and the same ./dist the repo's .gitignore covers when building
+# outside Docker.
+RUN CGO_ENABLED=0 builder --config=builder-config.yaml
 
 # ---- runtime image ----
 # distroless/static has no shell, no libc — fits a CGO_ENABLED=0 binary.

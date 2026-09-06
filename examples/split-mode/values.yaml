@@ -40,7 +40,7 @@ signals:
   logs:
     enabled: true
     sinceSeconds: 300
-    podLabelSelector: ""
+    podLabelSelector: "app.kubernetes.io/name!=otel-gateway"
   metrics:
     enabled: true
     scrapeAnnotated: true
@@ -70,6 +70,9 @@ collector:
       cpu: 500m
       memory: 512Mi
   export:
+    # Shared by all three groups: the debug gateway applied with the
+    # namespace-mode manifests, in this same namespace.
+    #   kubectl logs -n payments deploy/otel-gateway -f
     endpoint: "otel-gateway:4317"
     tls:
       insecure: true

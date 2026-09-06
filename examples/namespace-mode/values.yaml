@@ -31,7 +31,10 @@ signals:
     enabled: true
     sinceSeconds: 300
     # Collect only pods that belong to the payments platform.
-    # Remove this to collect all pods in the namespace.
+    # Remove this to collect all pods in the namespace — and if you do, add
+    # `app.kubernetes.io/name!=otel-gateway` instead, or the collector will
+    # tail the gateway's printed output and feed it back (see
+    # manifests/02-otel-gateway.yaml).
     podLabelSelector: "app.kubernetes.io/part-of=payments-platform"
     reconnectBackoff:
       initialInterval: 1s
@@ -61,7 +64,7 @@ signals:
 collector:
   image:
     # Replace with your OCB-built image that includes k8spodlogreceiver.
-    # See otel-components/builder-config.yaml and the Dockerfile at repo root.
+    # See builder-config.yaml and the Dockerfile at repo root.
     repository: ghcr.io/eugenekurasov/security-observability-stack/collector
     tag: "0.1.0"
     pullPolicy: IfNotPresent
@@ -77,7 +80,10 @@ collector:
       memory: 512Mi
 
   export:
-    # Point this at your OTLP gateway, Grafana Agent, or any OTLP-compatible backend.
+    # Point this at your OTLP gateway, Grafana Agent, or any OTLP-compatible
+    # backend. Here it is the debug gateway from manifests/, in this same
+    # namespace, so the short name resolves:
+    #   kubectl logs -n payments deploy/otel-gateway -f
     endpoint: "otel-gateway:4317"
     tls:
       insecure: true
