@@ -1,7 +1,4 @@
 [![CI](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/ci.yml)
-[![K8s compatibility tests](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/integration.yml/badge.svg?branch=main)](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/integration.yml)
-[![Lint](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/eugenekurasov/security-observability-stack/actions/workflows/lint.yml)
-
 
 # Security Observability Stack
 
@@ -29,7 +26,7 @@ Because collection goes through the Kubernetes API rather than the node
 filesystem, the same deployment works on standard, GPU, and serverless nodes
 without modification.
 
-The core component, `k8spodlogreceiver`, provides a working implementation
+The core component, [`k8spodlogreceiver`](https://github.com/eugenekurasov/k8spodlogreceiver), provides a working implementation
 of the API-server-based log collection mode discussed in
 [open-telemetry/opentelemetry-collector-contrib#23339](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/23339)
 — an approach raised in that thread as an alternative to hostPath-based
@@ -86,7 +83,7 @@ If node-level telemetry is needed, it belongs in a separate cluster-operator-man
 | Component | Path | Status |
 |---|---|---|
 | Helm chart | [`helm/observability-stack/`](helm/observability-stack/) | Available |
-| `k8spodlogreceiver` | [`otel-components/k8spodlogreceiver/`](otel-components/k8spodlogreceiver/) | Development / proof-of-concept |
+| `k8spodlogreceiver` | [eugenekurasov/k8spodlogreceiver](https://github.com/eugenekurasov/k8spodlogreceiver) (separate repo) | Development / proof-of-concept |
 | Examples | [`examples/`](examples/) | Available |
 | Compliance mapping | [`docs/compliance-mapping.md`](docs/compliance-mapping.md) | Available |
 
@@ -187,8 +184,9 @@ helm install my-obs helm/observability-stack \
 The Helm chart references `secobs-collector`, a custom distribution of the
 OpenTelemetry Collector built with
 [OpenTelemetry Collector Builder (OCB)](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder)
-that includes `k8spodlogreceiver`. Update `collector.image` in
-`values.yaml` once the OCB manifest and image build are in place.
+that includes `k8spodlogreceiver`, pulled from its own repository as a
+pinned module — see [`builder-config.yaml`](builder-config.yaml).
+Update `collector.image` in `values.yaml` once the image build is in place.
 
 `k8seventsreceiver`, the Prometheus receiver, and the OTLP receiver all ship
 in the standard `otel/opentelemetry-collector-contrib` image — a custom build
@@ -204,7 +202,7 @@ is only required for container log collection.
 
 - [ ] **Add renovate** we need to be able keep up in date the package and docker image
 
-- [ ] **CI flow** Add a GitHub Actions workflow to build and push images to ghcr.io. Also add a release workflow for the Helm chart and the Otel Component(`k8spodlogreceiver`)
+- [ ] **CI flow** Add a GitHub Actions workflow to build and push images to ghcr.io. Also add a release workflow for the Helm chart. (`k8spodlogreceiver` releases live in [its own repository](https://github.com/eugenekurasov/k8spodlogreceiver).)
 
 - [ ] **Rich filtering and parsing** — Stanza-style operator pipeline on top of the raw stream:
   multiline joining (stack traces, JSON blobs), structured log parsing, per-container format

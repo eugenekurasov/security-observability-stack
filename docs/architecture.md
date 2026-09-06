@@ -236,9 +236,11 @@ kept strictly separate from per-tenant data.
    controls map to SOC 2 Trust Services Criteria, including where the mapping
    stops.
 
-5. **Reproducible builds.** The OCB manifest (`otel-components/builder-config.yaml`)
-   and `go.mod` are checked in together with pinned versions. The exact
-   collector binary is reproducible from source via the `Dockerfile`.
+5. **Reproducible builds.** The OCB manifest (`builder-config.yaml`)
+   pins every component — including `k8spodlogreceiver`, consumed as a tagged
+   module from [the repository](https://github.com/eugenekurasov/k8spodlogreceiver).
+   The exact collector binary is reproducible from that manifest via the
+   `Dockerfile`.
 
 ---
 

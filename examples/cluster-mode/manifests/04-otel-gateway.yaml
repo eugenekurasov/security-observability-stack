@@ -1,0 +1,160 @@
+# Debug gateway: OTLP in, collector log out.
+#
+# The chart exports every signal to one OTLP endpoint. In a real install that
+# is a backend, or a real gateway fronting one; for the examples it is this
+# pod, which does nothing but print what it receives, so
+# `kubectl logs -n payments deploy/otel-gateway` shows the pipeline output
+# end to end.
+#
+# Why a separate pod rather than a debug exporter in the collector itself:
+# the collector tails pod logs through the API server, its own pod included.
+# A debug exporter there writes each record to the same stdout the collector
+# is reading, so every record is re-ingested and re-printed — an amplifying
+# loop. That is why the chart has no debug switch.
+#
+# The same reasoning applies to this pod: it must not be tailed either.
+# - namespace-mode/values.yaml selects pods by
+#   `app.kubernetes.io/part-of=payments-platform`, and this Deployment
+#   deliberately does not carry that label, so it is already excluded.
+# - split-mode/values.yaml collects every pod in the namespace, so it excludes
+#   this one by name with `app.kubernetes.io/name!=otel-gateway`.
+# Either way the name/labels below and the selector in values.yaml are a pair —
+# rename one and the loop comes back.
+#
+# Shared by both namespace-mode and split-mode (split-mode applies this same
+# directory). Stock upstream image: a gateway needs only OTLP in and debug
+# out, none of this repo's custom components.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-gateway
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: otel-gateway
+data:
+  gateway.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+
+    processors:
+      # Same shape as the collector's own processors: shed load before
+      # anything buffers, batch right before export.
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+      batch:
+        timeout: 5s
+        send_batch_size: 1024
+
+    exporters:
+      debug:
+        # detailed prints full attributes and bodies — the point of this pod.
+        # Drop to normal/basic if the log volume is unreadable.
+        verbosity: detailed
+
+    service:
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-gateway
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: otel-gateway
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-gateway
+        app.kubernetes.io/component: gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: otel/opentelemetry-collector:0.159.0
+          imagePullPolicy: IfNotPresent
+          args: ["--config=/etc/otelcol/gateway.yaml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+          # The core image has no health_check extension (contrib only), so
+          # readiness is "is the OTLP listener up" rather than a real health
+          # endpoint. Enough for an example.
+          readinessProbe:
+            tcpSocket:
+              port: otlp-grpc
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: gateway-config
+              mountPath: /etc/otelcol
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: gateway-config
+          configMap:
+            name: otel-gateway
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: otel-gateway
+spec:
+  selector:
+    app.kubernetes.io/name: otel-gateway
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+      protocol: TCP

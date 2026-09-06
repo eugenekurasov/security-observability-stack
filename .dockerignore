@@ -1,6 +1,0 @@
-.git
-.DS_Store
-.claude/
-docs/
-helm/
-otel-components/dist/

@@ -222,7 +222,6 @@ collector:
   # Must be a custom OCB-built image that includes k8spodlogreceiver.
   # The upstream otel/opentelemetry-collector-contrib image works for
   # metrics and traces but does not include k8spodlogreceiver.
-  # See otel-components/k8spodlogreceiver and the planned OCB manifest.
   image:
     repository: ghcr.io/eugenekurasov/security-observability-stack/collector
     tag: "0.1.0"
