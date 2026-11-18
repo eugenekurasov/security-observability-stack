@@ -30,20 +30,17 @@ The core component, [`k8spodlogreceiver`](https://github.com/eugenekurasov/k8spo
 of the API-server-based log collection mode discussed in
 [open-telemetry/opentelemetry-collector-contrib#23339](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/23339)
 — an approach raised in that thread as an alternative to hostPath-based
-collection, but never implemented. Each serverless platform blocks the
-DaemonSet/hostPath approach differently:
+collection, but never implemented.
 
-| Platform | What's blocked | API-based approach | Source |
-|---|---|---|---|
-| **AWS Fargate** | DaemonSets aren't supported at all | Deployment + API server, no per-node agent | [AWS EKS docs](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html) |
-| **AKS Virtual Nodes** | DaemonSets won't deploy pods to virtual nodes | Same Deployment, no node-resident collector needed | [Microsoft Learn](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes) |
-| **GKE Autopilot** | `hostPath` is read-only, `/var/log` only; reaching any tainted node type (GPU, spot, etc.) needs an explicit blanket toleration on top of that | No host mount, no DaemonSet, no tolerations to maintain | [GKE Autopilot security](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-security) |
-
-See [Serverless Kubernetes](docs/architecture.md#serverless-kubernetes-fargate-aks-virtual-nodes-gke-autopilot)
-for the full breakdown, including why GKE Autopilot's `/var/log` exception still
-doesn't remove the need for API-based collection. API-based collection sidesteps
-all three constraints — on these platforms it's not an alternative but the only
-viable path.
+Each serverless platform blocks the DaemonSet/hostPath approach differently:
+Fargate does not support DaemonSets at all, AKS Virtual Nodes will not schedule
+them onto ACI-backed nodes, and GKE Autopilot restricts `hostPath` to a
+read-only `/var/log` while taints on specialized node types force a blanket
+toleration. API-based collection sidesteps all three — on these platforms it is
+not an alternative but the only viable path. See
+[Serverless Kubernetes](docs/architecture.md#serverless-kubernetes-fargate-aks-virtual-nodes-gke-autopilot)
+for the per-platform breakdown with sources, including why GKE Autopilot's
+`/var/log` exception still does not remove the need for it.
 
 
 ### Practical benefits over DaemonSet-based collectors
@@ -69,23 +66,20 @@ from their own pods:
 
 ### What it intentionally does not cover
 
-| Out of scope | Why |
-|---|---|
-| Node logs (systemd journal, kubelet, containerd) | Requires hostPath mounts or a privileged DaemonSet — exactly the node-level trust this stack avoids |
-| Host-level metrics (disk I/O, network interfaces, OS-layer CPU) | Node exporters need host namespace access |
-| Control plane logs (kube-apiserver, etcd, scheduler) | Cluster operator concern, not tenant concern |
-| Container runtime / image pull logs | Below the pod API boundary |
-
-If node-level telemetry is needed, it belongs in a separate cluster-operator-managed pipeline — not mixed into per-tenant collectors.
+Node logs, host-level metrics, control plane logs, and container runtime logs
+are all out of scope — each needs the node-level trust this stack exists to
+avoid. If you need them, they belong in a separate cluster-operator-managed
+pipeline, not mixed into per-tenant collectors. See
+[Scope](docs/architecture.md#scope) for the per-item reasoning.
 
 ## Components
 
 | Component | Path | Status |
 |---|---|---|
 | Helm chart | [`helm/observability-stack/`](helm/observability-stack/) | Available |
-| `k8spodlogreceiver` | [eugenekurasov/k8spodlogreceiver](https://github.com/eugenekurasov/k8spodlogreceiver) (separate repo) | Development / proof-of-concept |
+| `k8spodlogreceiver` | [eugenekurasov/k8spodlogreceiver](https://github.com/eugenekurasov/k8spodlogreceiver) (separate repo) | See [receiver status](https://github.com/eugenekurasov/k8spodlogreceiver#status) |
 | Examples | [`examples/`](examples/) | Available |
-| Compliance mapping | [`docs/compliance-mapping.md`](docs/compliance-mapping.md) | Available |
+| Compliance mappings | [`docs/compliance/`](docs/compliance/) — [SOC 2](docs/compliance/soc2.md), [CISA LRA](docs/compliance/cisa-lra.md), [Pod Security Standards](docs/compliance/pod-security-standards.md) | Available |
 
 ### Examples
 
@@ -157,7 +151,10 @@ helm install my-obs helm/observability-stack \
 
 1. **No node-level trust by default.** Log and event collection use the
    Kubernetes API server, not host filesystem mounts, so a compromised
-   collector cannot read arbitrary node files.
+   collector cannot read arbitrary node files. Every collector pod the chart
+   renders satisfies the Kubernetes Pod Security Standards **Restricted**
+   level; a collector that mounts `hostPath` fails even Baseline — see
+   [the PSS mapping](docs/compliance/pod-security-standards.md).
 
 2. **Tenant isolation is an RBAC boundary, not a convention.** In namespace
    mode the Helm chart generates a `Role` + `RoleBinding` scoped to the
@@ -165,9 +162,9 @@ helm install my-obs helm/observability-stack \
    the signals that are enabled.
 
 3. **Control mapping is explicit, not implied.** See
-   [`docs/compliance-mapping.md`](docs/compliance-mapping.md) for how the
-   stack's controls map to SOC 2 Trust Services Criteria, including where the
-   mapping stops.
+   [`docs/compliance/`](docs/compliance/) for how the stack's controls map to
+   SOC 2 Trust Services Criteria and to CISA's Logging Reference Architecture —
+   including, in both, where the mapping stops.
 
 4. **Infrastructure and application code are versioned together.**
    Helm and the custom collector build manifest live in one repo so the
@@ -194,34 +191,82 @@ is only required for container log collection.
 
 ## Roadmap
 
-### v1 (current)
-- Single collector replica per tenant — `activeStreams` tracking is in-process only
-- Raw log lines forwarded as-is, one OTel log record per line
+`k8spodlogreceiver` moved to [its own repository](https://github.com/eugenekurasov/k8spodlogreceiver);
+work on the receiver itself is tracked there. This list is the chart, the
+collector image, and CI — what this repository actually ships.
 
 ### TODO
 
-- [ ] **Add renovate** we need to be able keep up in date the package and docker image
+- [x] **Persist read cursors across collector restarts** —
+  `signals.logs.cursorStorage` (on by default) gives `k8s_pod_log` a
+  `file_storage` extension on its own volume. The default `emptyDir` keeps
+  cursors across container restarts; `volume.type: persistentVolumeClaim` also
+  keeps them across pod replacement, at the cost of `replicas: 1` and the
+  `Recreate` strategy. No `hostPath`, so Pod Security Restricted still holds —
+  see [the LRA mapping](docs/compliance/cisa-lra.md#delivery-assurance-logs-checkpointed-events-not).
 
-- [ ] **CI flow** Add a GitHub Actions workflow to build and push images to ghcr.io. Also add a release workflow for the Helm chart. (`k8spodlogreceiver` releases live in [its own repository](https://github.com/eugenekurasov/k8spodlogreceiver).)
+- [ ] **TLS on the export hop by default** — `collector.export.tls.insecure`
+  defaults to `true`, on the assumption that a service mesh supplies mTLS
+  in-cluster. Without a mesh the first hop is plaintext, which fails the
+  M-26-14 Log Management maturity level agencies are required to reach — see
+  [the LRA mapping](docs/compliance/cisa-lra.md#log-management-maturity-the-chart-default-fails-level-3).
+  Flip the default, and make running without TLS the explicit opt-out.
 
-- [ ] **Rich filtering and parsing** — Stanza-style operator pipeline on top of the raw stream:
-  multiline joining (stack traces, JSON blobs), structured log parsing, per-container format
-  routing, and label/annotation-based filter rules. Goal: feature parity with
-  `filelogreceiver` filtering without the hostPath requirement.
+- [ ] **A redaction point before data leaves the boundary** — the collector
+  forwards container stdout verbatim, including whatever PII or tokens an
+  application prints, and the example gateway is the stock core image, which
+  has no redaction or transform processor. Ship an example gateway built with
+  one, so the documented pattern actually redacts — see
+  [the LRA mapping](docs/compliance/cisa-lra.md#sensitive-data-protection).
 
-- [X] **Label filtering** - Maybe we want also to be able filter pod by label. Possibly out of scope — feedback welcome.
+- [ ] **Enforce Pod Security Restricted in CI** — every rendered collector pod
+  satisfies Restricted today, but nothing checks it. Render each example in CI
+  and fail on any PSS violation, and label the example namespaces
+  `pod-security.kubernetes.io/enforce: restricted` so the examples demonstrate
+  the claim instead of asserting it — see
+  [the PSS mapping](docs/compliance/pod-security-standards.md).
 
-- [ ] **Load balancing / HA** - Add load balancing to support running multiple instances concurrently, and configure high availability (HA) so that replication continues if one of the instances fails. Possible `HA` will be implemented similar to K8sLeaderElector in the `k8sclusterreceiver` in the future.
+- [ ] **Raise the Events restart gap upstream** — `k8s_events` drops every
+  Event older than the receiver's start, and its `storage` option prevents
+  duplicates on resume but does not recover the downtime window, so each
+  collector restart is a permanent gap in Events. Not fixable from the chart;
+  belongs in an issue on `opentelemetry-collector-contrib` — see
+  [the LRA mapping](docs/compliance/cisa-lra.md#cluster-state-and-events-the-layer-this-stack-delivers).
 
-- [ ] **Benchmark test** - prepare a benchmark test for the new component.
+- [ ] **Add renovate** — keep the pinned module versions in `builder-config.yaml`
+  and the base images in `Dockerfile` current.
 
-- [ ] **Node metrics: direct kubelet scraping** — In cluster mode the node scrape jobs currently route through the API server proxy (`/api/v1/nodes/$1/proxy/metrics`, `/api/v1/nodes/$1/proxy/metrics/cadvisor`). At scale every Prometheus scrape of every node passes through the control plane. Switch to direct kubelet scraping on port 10250 (same pattern as `kube-prometheus-stack`) to remove the API server from the node metrics path entirely. **So it actually isn’t tied to `k8spodlogreceiver`; it could be implemented by another component in the future, such as a `kubeletpodlogreceiver`.** — feedback welcome
+- [ ] **CI flow** — a GitHub Actions workflow to build and push images to
+  ghcr.io, plus a release workflow for the Helm chart.
 
+- [ ] **Node metrics: direct kubelet scraping** — in cluster mode the node scrape
+  jobs route through the API server proxy (`/api/v1/nodes/$1/proxy/metrics`,
+  `/api/v1/nodes/$1/proxy/metrics/cadvisor`). At scale every Prometheus scrape of
+  every node passes through the control plane. Switch to direct kubelet scraping
+  on port 10250 (same pattern as `kube-prometheus-stack`) to take the API server
+  out of the node metrics path. Not tied to `k8spodlogreceiver` — feedback welcome.
+
+### Constraints inherited from the receiver
+
+These are not tracked here, but they shape how the chart is deployed. Full
+detail in the [receiver's known limitations](https://github.com/eugenekurasov/k8spodlogreceiver#known-limitations).
+
+- **Run a single replica per scope.** Stream ownership is in-process, so two
+  replicas stream the same pods and duplicate every record. Scale by
+  partitioning — one release per tenant or namespace group — which is the shape
+  this chart is built for anyway.
+- **One log record per line.** No multiline joining or structured parsing; do it
+  downstream.
+- **stdout and stderr arrive merged**, with no per-line marker — the `pods/log`
+  endpoint does not expose which stream a line came from.
 
 ## Status
 
-Early-stage, actively developed. See each component's README for current
-status and known limitations before using anything in production.
+Early-stage, actively developed. For `k8spodlogreceiver`, the current status
+and stable version are tracked in
+[its README](https://github.com/eugenekurasov/k8spodlogreceiver#status) — check
+it and the [known limitations](https://github.com/eugenekurasov/k8spodlogreceiver#known-limitations)
+before using anything in production.
 
 ## License
 
