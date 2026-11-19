@@ -24,7 +24,7 @@ proxy. Nothing is built from local sources.
 ### Build without Docker
 
 ```bash
-go install go.opentelemetry.io/collector/cmd/builder@v0.159.0
+go install go.opentelemetry.io/collector/cmd/builder@v0.165.0
 builder --config=builder-config.yaml
 ```
 

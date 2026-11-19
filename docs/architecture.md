@@ -77,17 +77,26 @@ flowchart LR
 | **Traces** | `otlp` (core) | Spans over gRPC (4317) / HTTP (4318) from instrumented applications |
 
 For the API-collected signals (logs, events, cluster metrics), the receivers set
-Kubernetes identity themselves: `k8s_pod_log` stamps `k8s.namespace.name`,
-`k8s.pod.name`, `k8s.pod.uid`, and `k8s.container.name` on the Resource from the
-pod object it reads, and `k8s_cluster` likewise attaches its k8s attributes to
-the Resource. `k8s_events` splits them: object identity (`k8s.object.*`,
-`k8s.node.name`) goes on the Resource, but the namespace and event details
+Kubernetes identity themselves. `k8s_pod_log` stamps six attributes on the
+Resource from the pod object it reads — `k8s.namespace.name`, `k8s.pod.name`,
+`k8s.pod.uid`, `k8s.container.name`, `k8s.node.name`, and
+`k8s.container.restart_count` (an integer) — taking every key from the OTel
+semantic conventions rather than a string literal, and setting the matching
+`SchemaUrl` on the ResourceLogs so a downstream schema processor can translate
+the batch. `k8s_cluster` likewise attaches its k8s attributes to the Resource.
+`k8s_events` splits them: object identity (`k8s.object.*`, `k8s.node.name`)
+goes on the Resource, but the namespace and event details
 (`k8s.namespace.name`, `k8s.event.*`) are set as log-record attributes, not
 Resource attributes. No enrichment processor runs on any pipeline — every signal
 keeps whatever attributes its receiver (or, for traces, the emitting
 application's OTel SDK) set. Traces therefore carry only the Kubernetes context the
 application's own resource detector provides; collector-side span enrichment is
 deferred (it would be a `k8sattributes` processor on the traces pipeline).
+
+Each log record carries two timestamps: `Timestamp` is the line's own time as
+reported by the container runtime (falling back to receipt time if the runtime
+gave none), and `ObservedTimestamp` is when the collector read it. The gap
+between them is the collection lag for that line, per record.
 
 The collector also exposes its own Go runtime metrics (heap, pipeline throughput,
 drop counts) at port 8888 via `service.telemetry`. When `signals.metrics` is
@@ -232,9 +241,9 @@ kept strictly separate from per-tenant data.
    a standard worker.
 
 4. **Control mapping is explicit, not implied.** See
-   [`compliance-mapping.md`](compliance-mapping.md) for how the stack's
-   controls map to SOC 2 Trust Services Criteria, including where the mapping
-   stops.
+   [`compliance/`](compliance/) for how the stack's controls map to SOC 2 Trust
+   Services Criteria and to CISA's Logging Reference Architecture — including,
+   in both, where the mapping stops.
 
 5. **Reproducible builds.** The OCB manifest (`builder-config.yaml`)
    pins every component — including `k8spodlogreceiver`, consumed as a tagged
@@ -244,28 +253,38 @@ kept strictly separate from per-tenant data.
 
 ---
 
-## Roadmap
+## Current constraints
 
-### v1 (current)
+Properties of the deployed system as it stands, rather than a plan. Most come
+from `k8spodlogreceiver`, which lives in
+[its own repository](https://github.com/eugenekurasov/k8spodlogreceiver) — see
+its [known limitations](https://github.com/eugenekurasov/k8spodlogreceiver#known-limitations)
+for the full set and the reasoning behind each.
 
-- Single collector replica per tenant — `activeStreams` tracking is in-process only
-- Raw log lines forwarded as-is, one OTel log record per line
-- In-cluster mode only (`api_config.auth_type: serviceAccount`); kubeconfig path
-  supported for local development
+- **One collector replica per scope.** Stream ownership is tracked in-process,
+  so two replicas discover the same pods and emit every record twice. The
+  intended way to scale is partitioning — one release per tenant or namespace
+  group — not replication. Cross-replica ownership (a consistent-hash ring on
+  pod UID plus lease coordination) would be needed for HA within a single scope.
+- **Raw lines, one OTel log record per line.** No multiline joining, no
+  structured parsing. Both belong downstream, or in a stanza-style operator
+  pipeline layered on the receiver later.
+- **stdout and stderr are merged** with no per-line marker, so no
+  `log.iostream` attribute is set. The `pods/log` endpoint does not expose the
+  distinction, even though the runtime records it on disk.
+- **In-cluster auth only** in the chart (`api_config.auth_type: serviceAccount`);
+  the receiver also supports a kubeconfig path for local development.
+- **Every collector restart leaves a permanent gap in Kubernetes Events.**
+  This one comes from the upstream `k8s_events` receiver, not
+  `k8spodlogreceiver`: it drops any Event timestamped before the receiver
+  started, and the API server keeps Events for only `--event-ttl` (one hour by
+  default). Its `storage` option prevents duplicates on resume, not the gap.
+- **Read cursors are only as durable as their volume.** The chart checkpoints
+  them to `file_storage` (`signals.logs.cursorStorage`). The default `emptyDir`
+  survives container restarts (OOMKill, liveness failure) but not the pod being
+  replaced: a rollout, eviction or drain re-reads from `since_seconds`. Set
+  `volume.type: persistentVolumeClaim` to survive those too. The trade is one
+  replica and the `Recreate` strategy, because file_storage locks its file.
 
-### Planned
-
-- **Rich filtering and parsing** — Stanza-style operator pipeline over the raw
-  stream: multiline joining (stack traces, JSON blobs), structured log parsing,
-  per-container format routing, label/annotation-based filter rules.
-
-- **Load balancing / HA** — The first version is intentionally a single runner;
-  two replicas would duplicate every log line because stream state is in-process.
-  Planned: consistent-hash ring on pod UID with Kubernetes lease-based
-  coordination so each container is owned by exactly one replica.
-
-- **Node metrics: direct kubelet scraping** — In cluster mode the node scrape
-  jobs currently route through the API server proxy. At scale every Prometheus
-  scrape of every node passes through the control plane. Switch to direct kubelet
-  scraping on port 10250 (same pattern as `kube-prometheus-stack`) to remove the
-  API server from the node metrics path.
+Planned work on the chart, the collector image, and CI is tracked in the
+[README roadmap](../README.md#roadmap).

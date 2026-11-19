@@ -1,8 +1,9 @@
-# Compliance Mapping
+# SOC 2 Trust Services Criteria
 
 Control-by-control mapping of the security-observability-stack to SOC 2
 Trust Services Criteria. Intended as a starting point for audits — not a
-substitute for a formal assessment.
+substitute for a formal assessment. See [the index](README.md) for what these
+mappings claim and what they do not.
 
 **Status legend**
 
@@ -13,8 +14,6 @@ substitute for a formal assessment.
 | ❌ | Out of scope — must be addressed elsewhere |
 
 ---
-
-## SOC 2 (Trust Services Criteria)
 
 SOC 2 is organised around five Trust Services Categories. The ones most
 relevant to an observability stack are **Security (CC)** and **Availability (A)**.
@@ -84,3 +83,6 @@ scope of the observability collection layer:
 
 - Extend with CIS Kubernetes Benchmark controls (cloud RBAC, network
   policies).
+
+See also: [CISA Logging Reference Architecture](cisa-lra.md) — a different kind
+of mapping, against an architecture framework rather than an audit control set.

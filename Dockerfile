@@ -21,7 +21,7 @@ RUN apk add --no-cache git ca-certificates
 
 # Install OCB at the same version as the collector components.
 # Bump this together with otelcol_version in builder-config.yaml.
-RUN go install go.opentelemetry.io/collector/cmd/builder@v0.159.0
+RUN go install go.opentelemetry.io/collector/cmd/builder@v0.165.0
 
 WORKDIR /build
 
